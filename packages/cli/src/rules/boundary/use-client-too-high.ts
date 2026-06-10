@@ -13,7 +13,7 @@ export const useClientTooHigh: Rule = {
       if (isIgnored(ctx, "use-client-too-high", mod.filePath)) continue;
       const isHighFile =
         /\/(layout|page|template)\.(t|j)sx?$/.test(mod.filePath) ||
-        mod.subtreeBytes() > subtreeBytesHigh;
+        mod.subtreeBytes > subtreeBytesHigh;
       if (!isHighFile) continue;
 
       const subtree = collectSubtree(ctx, mod.filePath);
@@ -34,9 +34,9 @@ export const useClientTooHigh: Rule = {
           message: "'use client' is placed too high — most of the subtree is server-safe",
           evidence: {
             signalModules: withSignals.map((m) => relPath(ctx.projectRoot, m.filePath)),
-            subtreeBytes: mod.subtreeBytes(),
+            subtreeBytes: mod.subtreeBytes,
           },
-          estimatedBytes: mod.subtreeBytes(),
+          estimatedBytes: mod.subtreeBytes,
           fixStrategy: {
             name: "move-boundary-down",
             steps: [

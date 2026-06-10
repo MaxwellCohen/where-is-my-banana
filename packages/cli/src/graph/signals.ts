@@ -1,5 +1,6 @@
 import type { Program } from "oxc-parser";
 import type { ClientSignals, Loc } from "../types.js";
+import { locFromSpan } from "./loc.js";
 
 const BROWSER_GLOBALS = new Set([
   "window",
@@ -194,23 +195,6 @@ function getProcessEnvName(node: AstNode): string | null {
 function nodeOffset(node: { span?: { start: number; end: number }; start?: number; end?: number }, end = false): number {
   if (end) return node.span?.end ?? node.end ?? 0;
   return node.span?.start ?? node.start ?? 0;
-}
-
-function locFromSpan(node: { span?: { start: number; end: number }; start?: number; end?: number }, lines: string[], end = false): Loc {
-  const offset = nodeOffset(node, end);
-  let line = 1;
-  let col = 1;
-  let pos = 0;
-  for (const l of lines) {
-    const len = l.length + 1;
-    if (pos + len > offset) {
-      col = offset - pos + 1;
-      break;
-    }
-    pos += len;
-    line++;
-  }
-  return { line, column: col };
 }
 
 function nodeSpan(node: { span?: { start: number; end: number }; start?: number; end?: number }, _lines: string[]): number {

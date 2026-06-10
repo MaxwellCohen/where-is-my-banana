@@ -24,7 +24,7 @@ export const missingDynamicImport: Rule = {
             loc: imp.loc,
             message: `Heavy component '${imp.packageName}' statically imported — use next/dynamic`,
             evidence: { package: imp.packageName },
-            estimatedBytes: mod.subtreeBytes(),
+            estimatedBytes: mod.subtreeBytes,
             fixStrategy: {
               name: "dynamic-import",
               steps: [
@@ -38,7 +38,7 @@ export const missingDynamicImport: Rule = {
       for (const imp of mod.imports) {
         if (!imp.resolvedPath || imp.isDynamic) continue;
         const target = ctx.graph.modules.get(imp.resolvedPath);
-        if (!target || target.subtreeBytes() <= dynamicImportMinSubtree) continue;
+        if (!target || target.subtreeBytes <= dynamicImportMinSubtree) continue;
         if (isIgnored(ctx, "missing-dynamic-import", path)) continue;
         ctx.report(
           makeFinding(ctx, {
@@ -50,7 +50,7 @@ export const missingDynamicImport: Rule = {
             file: path,
             loc: imp.loc,
             message: "Large local module statically imported — candidate for next/dynamic",
-            evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes() },
+            evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes },
             estimatedBytes: target.subtreeBytes(),
             fixStrategy: {
               name: "conditional-dynamic",

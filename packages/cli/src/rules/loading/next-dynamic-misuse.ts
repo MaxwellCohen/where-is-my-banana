@@ -12,7 +12,7 @@ export const nextDynamicMisuse: Rule = {
       for (const imp of mod.imports) {
         if (!imp.isDynamic || !imp.resolvedPath) continue;
         const target = ctx.graph.modules.get(imp.resolvedPath);
-        if (target && target.subtreeBytes() < dynamicMisuseMaxSubtree) {
+        if (target && target.subtreeBytes < dynamicMisuseMaxSubtree) {
           if (isIgnored(ctx, "next-dynamic-misuse", mod.filePath)) continue;
           ctx.report(
             makeFinding(ctx, {
@@ -24,7 +24,7 @@ export const nextDynamicMisuse: Rule = {
               file: mod.filePath,
               loc: imp.loc,
               message: "dynamic() used for a small module — overhead exceeds benefit",
-              evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes() },
+              evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes },
               fixStrategy: {
                 name: "revert-static",
                 steps: ["Revert to static import"],

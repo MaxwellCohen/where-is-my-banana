@@ -13,6 +13,9 @@ importers:
       citty:
         specifier: ^0.1.6
         version: 0.1.6
+      jiti:
+        specifier: ^2.7.0
+        version: 2.7.0
       module-replacements:
         specifier: ^2.4.0
         version: 2.11.0

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "citty": "^0.1.6",
+    "jiti": "^2.7.0",
     "module-replacements": "^2.4.0",
     "oxc-parser": "^0.75.0",
     "oxc-resolver": "^11.0.0"

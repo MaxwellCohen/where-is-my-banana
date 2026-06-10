@@ -26,7 +26,7 @@ export const useClientUnnecessary: Rule = {
           confidence: hasReexports ? "medium" : "high",
           file: mod.filePath,
           message: "File has 'use client' but no client signals or client-only dependencies",
-          evidence: { importChain: mod.importChainFromEntry() },
+          evidence: { importChain: mod.importChainFromEntry },
           fixStrategy: {
             name: "remove-use-client",
             steps: [

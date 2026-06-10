@@ -28,7 +28,7 @@ export const heavyClientImport: Rule = {
             file: path,
             loc: imp.loc,
             message: `Heavy package '${imp.packageName}' imported in client graph`,
-            evidence: { package: imp.packageName, importChain: mod.importChainFromEntry() },
+            evidence: { package: imp.packageName, importChain: mod.importChainFromEntry },
             estimatedBytes: size,
             fixStrategy: {
               name: "reduce-heavy-import",

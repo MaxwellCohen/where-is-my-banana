@@ -28,7 +28,7 @@ export const serverLogicInClient: Rule = {
             nodeBuiltins: mod.signals.nodeBuiltins,
             serverImports: serverImports.map((i) => i.packageName),
             envReads: secretEnv.map((e) => e.name),
-            importChain: mod.importChainFromEntry(),
+            importChain: mod.importChainFromEntry,
           },
           fixStrategy: {
             name: "move-server-logic",

@@ -2,7 +2,6 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import type { ByteAttribution } from "../types.js";
-import { parseNextConfig } from "../config.js";
 
 export interface BuildOptions {
   projectRoot: string;
@@ -10,10 +9,9 @@ export interface BuildOptions {
   skipBuild?: boolean;
 }
 
-export function resolveDistDir(projectRoot: string, flag?: string): string {
+export function resolveDistDir(projectRoot: string, distDirName?: string, flag?: string): string {
   if (flag) return join(projectRoot, flag);
-  const nextConfig = parseNextConfig(projectRoot);
-  return join(projectRoot, nextConfig?.distDir ?? ".next");
+  return join(projectRoot, distDirName ?? ".next");
 }
 
 export async function runBuildAnalysis(opts: BuildOptions): Promise<ByteAttribution | null> {

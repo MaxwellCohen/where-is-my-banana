@@ -1,0 +1,10 @@
+{
+  "name": "dynamic-import-fixture",
+  "private": true,
+  "devDependencies": {
+    "next": "^15.0.0"
+  },
+  "dependencies": {
+    "recharts": "^2.15.0"
+  }
+}

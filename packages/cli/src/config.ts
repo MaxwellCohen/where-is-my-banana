@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { WimbConfig, ParsedNextConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: WimbConfig = {
@@ -30,12 +31,27 @@ export const DEFAULT_CONFIG: WimbConfig = {
   severityOverrides: {},
 };
 
+export function mergeConfig(defaults: WimbConfig, user: Partial<WimbConfig>): WimbConfig {
+  return {
+    thresholds: { ...defaults.thresholds, ...user.thresholds },
+    ignores: {
+      files: dedupe([...(defaults.ignores.files ?? []), ...(user.ignores?.files ?? [])]),
+      rules: dedupe([...(defaults.ignores.rules ?? []), ...(user.ignores?.rules ?? [])]),
+    },
+    severityOverrides: { ...defaults.severityOverrides, ...user.severityOverrides },
+  };
+}
+
+function dedupe(items: string[]): string[] {
+  return [...new Set(items)];
+}
+
 export async function loadConfig(projectRoot: string): Promise<WimbConfig> {
   const configPath = join(projectRoot, "wimb.config.ts");
   if (!existsSync(configPath)) return DEFAULT_CONFIG;
   try {
     const mod = await import(configPath);
-    return { ...DEFAULT_CONFIG, ...mod.default };
+    return mergeConfig(DEFAULT_CONFIG, mod.default ?? {});
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -52,22 +68,73 @@ const NEXT_BUILTIN_OPTIMIZE = [
   "ramda",
 ];
 
-export function parseNextConfig(projectRoot: string): ParsedNextConfig | null {
+export function parseNextConfigFromSource(content: string): ParsedNextConfig {
+  const distDir = extractStringProp(content, "distDir") ?? ".next";
+  const optimize = extractArrayProp(content, "optimizePackageImports") ?? [];
+  const fallbacks = extractWebpackFallbacks(content);
+  const aliases = extractResolveAliases(content);
+  return {
+    distDir,
+    optimizePackageImports: optimize,
+    webpackFallbacks: fallbacks,
+    resolveAliases: aliases,
+  };
+}
+
+function normalizeNextConfig(raw: unknown): ParsedNextConfig {
+  const config = (raw as { default?: unknown }).default ?? raw;
+  const obj = config as Record<string, unknown>;
+  const distDir = typeof obj.distDir === "string" ? obj.distDir : ".next";
+  const optimize = Array.isArray(obj.optimizePackageImports)
+    ? obj.optimizePackageImports.filter((x): x is string => typeof x === "string")
+    : [];
+
+  const fallbacks: string[] = [];
+  const aliases: string[] = [];
+  const webpack = obj.webpack as ((config: unknown) => unknown) | undefined;
+  if (typeof webpack === "function") {
+    // webpack function configs cannot be evaluated safely — leave empty
+  }
+  const experimental = obj.experimental as Record<string, unknown> | undefined;
+  if (experimental && Array.isArray(experimental.optimizePackageImports)) {
+    for (const item of experimental.optimizePackageImports) {
+      if (typeof item === "string") optimize.push(item);
+    }
+  }
+
+  return {
+    distDir,
+    optimizePackageImports: [...new Set(optimize)],
+    webpackFallbacks: fallbacks,
+    resolveAliases: aliases,
+  };
+}
+
+async function tryLoadNextConfig(configPath: string): Promise<unknown | null> {
+  try {
+    if (configPath.endsWith(".ts")) {
+      const { createJiti } = await import("jiti");
+      const jiti = createJiti(import.meta.url, { interopDefault: true });
+      return jiti(configPath);
+    }
+    const mod = await import(pathToFileURL(configPath).href);
+    return mod.default ?? mod;
+  } catch {
+    return null;
+  }
+}
+
+export async function parseNextConfig(projectRoot: string): Promise<ParsedNextConfig | null> {
   const candidates = ["next.config.ts", "next.config.mjs", "next.config.js"];
   for (const name of candidates) {
     const path = join(projectRoot, name);
     if (!existsSync(path)) continue;
+
+    const loaded = await tryLoadNextConfig(path);
+    if (loaded) return normalizeNextConfig(loaded);
+
     const content = readFileSync(path, "utf-8");
-    const distDir = extractStringProp(content, "distDir") ?? ".next";
-    const optimize = extractArrayProp(content, "optimizePackageImports") ?? [];
-    const fallbacks = extractWebpackFallbacks(content);
-    const aliases = extractResolveAliases(content);
-    return {
-      distDir,
-      optimizePackageImports: optimize,
-      webpackFallbacks: fallbacks,
-      resolveAliases: aliases,
-    };
+    return parseNextConfigFromSource(content);
   }
   return null;
 }

@@ -14,7 +14,13 @@ describe("e2e scan", () => {
     expect(ruleIds).toContain("server-logic-in-client");
     expect(ruleIds).toContain("barrel-import");
     expect(ruleIds).toContain("env-var-misuse");
+    expect(ruleIds).toContain("heavy-client-import");
     expect(code).toBe(1);
+  });
+
+  it("rejects non-Next projects with exit code 2", async () => {
+    const code = await scan({ projectRoot: fixturePath("not-next"), formats: ["json"] });
+    expect(code).toBe(2);
   });
 });
 

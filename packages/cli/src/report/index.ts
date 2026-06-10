@@ -13,13 +13,19 @@ export function buildReport(
 ): ScanReport {
   const bySeverity: Record<Severity, number> = { error: 0, warning: 0, info: 0 };
   const byCategory: Record<string, number> = {};
-  let estimatedClientBytes = 0;
+  const byteKeys = new Map<string, number>();
 
   for (const f of findings) {
     bySeverity[f.severity]++;
     byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
-    estimatedClientBytes += f.estimatedBytes ?? 0;
+    if (f.estimatedBytes == null) continue;
+    const key = byteDedupeKey(f);
+    const prev = byteKeys.get(key) ?? 0;
+    byteKeys.set(key, Math.max(prev, f.estimatedBytes));
   }
+
+  // Approximate upper bound — deduped by package/module per finding
+  const estimatedClientBytes = [...byteKeys.values()].reduce((sum, n) => sum + n, 0);
 
   return {
     version: "1.0.0",
@@ -55,4 +61,13 @@ export function exitCodeForReport(report: ScanReport, threshold: Severity = "err
   const thresholdLevel = SEVERITY_ORDER[threshold];
   const hasAtOrAbove = report.findings.some((f) => SEVERITY_ORDER[f.severity] >= thresholdLevel);
   return hasAtOrAbove ? 1 : 0;
+}
+
+function byteDedupeKey(f: Finding): string {
+  const evidence = f.evidence ?? {};
+  return (
+    (typeof evidence.package === "string" && evidence.package) ||
+    (typeof evidence.module === "string" && evidence.module) ||
+    `${f.ruleId}:${f.file}`
+  );
 }

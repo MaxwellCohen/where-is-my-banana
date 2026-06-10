@@ -51,8 +51,8 @@ export interface Module {
   ast: () => Program;
   signals: ClientSignals;
   sourceBytes: number;
-  subtreeBytes: () => number;
-  importChainFromEntry: () => string[];
+  subtreeBytes: number;
+  importChainFromEntry: string[];
   dependents: string[];
 }
 

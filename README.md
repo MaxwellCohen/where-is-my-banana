@@ -60,9 +60,19 @@ wimb scan --format json,md,sarif
 
 ## Output
 
+Reports are written into the **target app** directory on every scan (existing files are overwritten):
+
 - `wimb-report.json` — stable schema for agents
 - `wimb-report.md` — human summary
 - `wimb-report.sarif` — code scanning integration
+
+Add these to your app's `.gitignore` if you do not want them committed:
+
+```
+wimb-report.json
+wimb-report.md
+wimb-report.sarif
+```
 
 ## Configuration
 

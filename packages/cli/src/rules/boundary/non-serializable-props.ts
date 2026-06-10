@@ -30,7 +30,7 @@ export const nonSerializableProps: Rule = {
           confidence: "medium",
           file: mod.filePath,
           message: "Server component may pass non-serializable props to a client component",
-          evidence: { importChain: mod.importChainFromEntry() },
+          evidence: { importChain: mod.importChainFromEntry },
           fixStrategy: {
             name: "serialize-props",
             steps: [

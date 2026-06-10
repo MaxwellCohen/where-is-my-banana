@@ -1,1 +1,7 @@
-{ "name": "use-client-unnecessary-fixture", "private": true }
+{
+  "name": "use-client-unnecessary-fixture",
+  "private": true,
+  "devDependencies": {
+    "next": "^15.0.0"
+  }
+}

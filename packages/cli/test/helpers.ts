@@ -23,7 +23,7 @@ export async function runScanOnFixture(name: string): Promise<Finding[]> {
     config: DEFAULT_CONFIG,
     pkg: loadPackageInfo(projectRoot),
     data: loadDataTables(),
-    nextConfig: parseNextConfig(projectRoot),
+    nextConfig: await parseNextConfig(projectRoot),
     byteAttribution: null,
     report: (f: Finding) => findings.push(f),
   };

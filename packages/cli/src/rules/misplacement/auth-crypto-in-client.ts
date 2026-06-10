@@ -29,7 +29,7 @@ export const authCryptoInClient: Rule = {
           evidence: {
             imports: authImports.map((i) => i.packageName),
             schemaImport,
-            importChain: mod.importChainFromEntry(),
+            importChain: mod.importChainFromEntry,
           },
           fixStrategy: {
             name: "move-auth-server",

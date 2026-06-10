@@ -3,15 +3,10 @@ import { join, relative, extname, dirname } from "node:path";
 import { parseSync } from "oxc-parser";
 import { ResolverFactory } from "oxc-resolver";
 import { extractSignals } from "./signals.js";
-import { getPackageName } from "./package-info.js";
-import type {
-  Module,
-  ModuleGraph,
-  Import,
-  ExportInfo,
-  Directive,
-  ModuleEnv,
-} from "../types.js";
+import { extractDirectives } from "./directives.js";
+import { extractImports } from "./imports.js";
+import { locFromSpan } from "./loc.js";
+import type { Module, ModuleGraph, ExportInfo } from "../types.js";
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const APP_DIRS = ["app", "src/app", "pages", "src/pages", "middleware.ts", "src/middleware.ts"];
@@ -38,9 +33,17 @@ export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
 
     const source = readFileSync(filePath, "utf-8");
     const parsed = parseSync(filePath, source, { sourceType: "module" });
-    const directives = extractDirectives(source, parsed.program);
-    const imports = extractImports(filePath, source, parsed.program, projectRoot, resolver);
-    const exports = extractExports(parsed.program);
+    const lines = source.split("\n");
+    const directives = extractDirectives(parsed.program);
+    const imports = extractImports(
+      filePath,
+      source,
+      parsed.program,
+      projectRoot,
+      resolver,
+      resolveImport,
+    );
+    const exports = extractExports(parsed.program, lines);
     const signals = extractSignals(source, parsed.program);
     const sourceBytes = statSync(filePath).size;
 
@@ -54,9 +57,9 @@ export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
       ast: () => parsed.program,
       signals,
       sourceBytes,
+      subtreeBytes: 0,
+      importChainFromEntry: [filePath],
       dependents: [],
-      subtreeBytes: () => 0,
-      importChainFromEntry: () => [filePath],
     };
 
     modules.set(filePath, mod);
@@ -113,78 +116,6 @@ function walkDir(dir: string, out: string[]) {
   }
 }
 
-function extractDirectives(source: string, _program: unknown): Set<Directive> {
-  const directives = new Set<Directive>();
-  const firstLines = source.split("\n").slice(0, 10);
-  for (const line of firstLines) {
-    const trimmed = line.trim().replace(/['"]/g, "").replace(/;+$/, "");
-    if (trimmed === "use client") directives.add("use client");
-    if (trimmed === "use server") directives.add("use server");
-  }
-  if (source.includes("server-only")) directives.add("server-only");
-  if (source.includes("client-only")) directives.add("client-only");
-  return directives;
-}
-
-function extractImports(
-  filePath: string,
-  source: string,
-  program: ReturnType<typeof parseSync>["program"],
-  projectRoot: string,
-  resolver: ResolverFactory,
-): Import[] {
-  const imports: Import[] = [];
-  const lines = source.split("\n");
-
-  for (const stmt of program.body) {
-    if (stmt.type === "ImportDeclaration") {
-      const specifier = stmt.source?.value ?? "";
-      const resolved = resolveImport(filePath, specifier, projectRoot, resolver);
-      imports.push({
-        specifier,
-        resolvedPath: resolved,
-        packageName: getPackageName(specifier),
-        namedSymbols: stmt.specifiers?.map((s) => {
-          if (s.type === "ImportDefaultSpecifier") return "default";
-          if (s.type === "ImportNamespaceSpecifier") return "*";
-          return s.local?.name ?? "";
-        }) ?? [],
-        isDynamic: false,
-        isTypeOnly: stmt.importKind === "type",
-        loc: lineLoc(stmt.span?.start ?? stmt.start ?? 0, lines),
-      });
-    }
-    if (stmt.type === "ExportAllDeclaration" && stmt.source) {
-      const specifier = stmt.source.value;
-      const resolved = resolveImport(filePath, specifier, projectRoot, resolver);
-      imports.push({
-        specifier,
-        resolvedPath: resolved,
-        packageName: getPackageName(specifier),
-        namedSymbols: ["*"],
-        isDynamic: false,
-        isTypeOnly: false,
-        loc: lineLoc(stmt.span?.start ?? stmt.start ?? 0, lines),
-      });
-    }
-    if (stmt.type === "ExportNamedDeclaration" && stmt.source) {
-      const specifier = stmt.source.value;
-      const resolved = resolveImport(filePath, specifier, projectRoot, resolver);
-      imports.push({
-        specifier,
-        resolvedPath: resolved,
-        packageName: getPackageName(specifier),
-        namedSymbols: stmt.specifiers?.map((s) => s.exported?.name ?? "") ?? [],
-        isDynamic: false,
-        isTypeOnly: false,
-        loc: lineLoc(stmt.span?.start ?? stmt.start ?? 0, lines),
-      });
-    }
-  }
-
-  return imports;
-}
-
 function resolveImport(
   from: string,
   specifier: string,
@@ -202,14 +133,17 @@ function resolveImport(
   return nmResult.path ?? null;
 }
 
-function extractExports(program: ReturnType<typeof parseSync>["program"]): ExportInfo[] {
+function extractExports(
+  program: ReturnType<typeof parseSync>["program"],
+  lines: string[],
+): ExportInfo[] {
   const exports: ExportInfo[] = [];
   for (const stmt of program.body) {
     if (stmt.type === "ExportNamedDeclaration") {
       if (stmt.declaration?.type === "FunctionDeclaration" && stmt.declaration.id) {
         exports.push({
           name: stmt.declaration.id.name,
-          loc: { line: 1, column: 1 },
+          loc: locFromSpan(stmt.declaration, lines),
           referencedBy: [],
           isAsync: stmt.declaration.async ?? false,
         });
@@ -219,7 +153,7 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
           if (decl.id.type === "Identifier") {
             exports.push({
               name: decl.id.name,
-              loc: { line: 1, column: 1 },
+              loc: locFromSpan(decl, lines),
               referencedBy: [],
               isAsync: false,
             });
@@ -227,9 +161,16 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
         }
       }
       for (const spec of stmt.specifiers ?? []) {
+        const exported =
+          spec.exported?.type === "Identifier"
+            ? spec.exported.name
+            : spec.exported?.type === "Literal"
+              ? String(spec.exported.value)
+              : "";
+        const local = spec.local?.type === "Identifier" ? spec.local.name : "";
         exports.push({
-          name: spec.exported?.name ?? spec.local?.name ?? "",
-          loc: { line: 1, column: 1 },
+          name: exported || local,
+          loc: locFromSpan(spec, lines),
           referencedBy: [],
           isAsync: false,
         });
@@ -238,7 +179,7 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
     if (stmt.type === "ExportDefaultDeclaration") {
       exports.push({
         name: "default",
-        loc: { line: 1, column: 1 },
+        loc: locFromSpan(stmt, lines),
         referencedBy: [],
         isAsync: false,
       });
@@ -246,7 +187,7 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
     if (stmt.type === "FunctionDeclaration" && stmt.id) {
       exports.push({
         name: stmt.id.name,
-        loc: { line: 1, column: 1 },
+        loc: locFromSpan(stmt, lines),
         referencedBy: [],
         isAsync: stmt.async ?? false,
       });
@@ -256,7 +197,7 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
         if (decl.id.type === "Identifier") {
           exports.push({
             name: decl.id.name,
-            loc: { line: 1, column: 1 },
+            loc: locFromSpan(decl, lines),
             referencedBy: [],
             isAsync: false,
           });
@@ -265,8 +206,18 @@ function extractExports(program: ReturnType<typeof parseSync>["program"]): Expor
     }
   }
   if (sourceHasMetadata(program)) {
-    exports.push({ name: "metadata", loc: { line: 1, column: 1 }, referencedBy: [], isAsync: false });
-    exports.push({ name: "generateMetadata", loc: { line: 1, column: 1 }, referencedBy: [], isAsync: false });
+    exports.push({
+      name: "metadata",
+      loc: { line: 1, column: 1 },
+      referencedBy: [],
+      isAsync: false,
+    });
+    exports.push({
+      name: "generateMetadata",
+      loc: { line: 1, column: 1 },
+      referencedBy: [],
+      isAsync: false,
+    });
   }
   return exports;
 }
@@ -310,6 +261,7 @@ function classifyBoundaries(modules: Map<string, Module>, entries: string[]) {
     const mod = modules.get(current);
     if (!mod) continue;
     for (const imp of mod.imports) {
+      if (imp.isDynamic) continue;
       if (imp.resolvedPath && !clientReachable.has(imp.resolvedPath)) {
         clientReachable.add(imp.resolvedPath);
         queue.push(imp.resolvedPath);
@@ -341,46 +293,44 @@ function isAppRoute(filePath: string): boolean {
 
 function computeSubtreeBytes(modules: Map<string, Module>) {
   for (const mod of modules.values()) {
-    mod.subtreeBytes = () => {
-      const visited = new Set<string>();
-      const stack = [mod.filePath];
-      let total = 0;
-      while (stack.length > 0) {
-        const p = stack.pop()!;
-        if (visited.has(p)) continue;
-        visited.add(p);
-        const m = modules.get(p);
-        if (!m) continue;
-        total += m.sourceBytes;
-        for (const imp of m.imports) {
-          if (imp.resolvedPath) stack.push(imp.resolvedPath);
-        }
+    const visited = new Set<string>();
+    const stack = [mod.filePath];
+    let total = 0;
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      if (visited.has(p)) continue;
+      visited.add(p);
+      const m = modules.get(p);
+      if (!m) continue;
+      total += m.sourceBytes;
+      for (const imp of m.imports) {
+        if (imp.resolvedPath) stack.push(imp.resolvedPath);
       }
-      return total;
-    };
+    }
+    mod.subtreeBytes = total;
   }
 }
 
 function computeImportChains(modules: Map<string, Module>, entries: string[]) {
   for (const mod of modules.values()) {
-    mod.importChainFromEntry = () => {
-      const visited = new Set<string>();
-      const queue: { path: string; chain: string[] }[] = entries.map((e) => ({ path: e, chain: [e] }));
-      while (queue.length > 0) {
-        const { path, chain } = queue.shift()!;
-        if (path === mod.filePath) return chain;
-        if (visited.has(path)) continue;
-        visited.add(path);
-        const m = modules.get(path);
-        if (!m) continue;
-        for (const imp of m.imports) {
-          if (imp.resolvedPath) {
-            queue.push({ path: imp.resolvedPath, chain: [...chain, imp.resolvedPath] });
-          }
+    const visited = new Set<string>();
+    const queue: { path: string; chain: string[] }[] = entries.map((e) => ({ path: e, chain: [e] }));
+    while (queue.length > 0) {
+      const { path, chain } = queue.shift()!;
+      if (path === mod.filePath) {
+        mod.importChainFromEntry = chain;
+        break;
+      }
+      if (visited.has(path)) continue;
+      visited.add(path);
+      const m = modules.get(path);
+      if (!m) continue;
+      for (const imp of m.imports) {
+        if (imp.resolvedPath) {
+          queue.push({ path: imp.resolvedPath, chain: [...chain, imp.resolvedPath] });
         }
       }
-      return [mod.filePath];
-    };
+    }
   }
 }
 
@@ -397,18 +347,6 @@ function trackExportReferences(modules: Map<string, Module>) {
       }
     }
   }
-}
-
-function lineLoc(offset: number, lines: string[]) {
-  let line = 1;
-  let pos = 0;
-  for (const l of lines) {
-    const len = l.length + 1;
-    if (pos + len > offset) break;
-    pos += len;
-    line++;
-  }
-  return { line, column: 1 };
 }
 
 export function relPath(projectRoot: string, filePath: string): string {

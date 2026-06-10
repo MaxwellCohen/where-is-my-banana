@@ -33,7 +33,7 @@ export const providerPullsInTree: Rule = {
             imports: nonReactImports.map((i) => i.packageName),
             heavyImport: heavyImport?.packageName,
           },
-          estimatedBytes: mod.subtreeBytes(),
+          estimatedBytes: mod.subtreeBytes,
           fixStrategy: {
             name: "minimal-provider",
             steps: [

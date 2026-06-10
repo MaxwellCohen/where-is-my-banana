@@ -2,6 +2,8 @@ import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { PackageInfo } from "../types.js";
 
+const installSizeCache = new Map<string, number>();
+
 export function loadPackageInfo(projectRoot: string): PackageInfo {
   const pkgPath = join(projectRoot, "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
@@ -37,6 +39,9 @@ function installSize(nodeModules: string, pkgName: string): number {
 }
 
 function du(dir: string): number {
+  const cached = installSizeCache.get(dir);
+  if (cached != null) return cached;
+
   let total = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
@@ -47,6 +52,7 @@ function du(dir: string): number {
       total += statSync(path).size;
     }
   }
+  installSizeCache.set(dir, total);
   return total;
 }
 
