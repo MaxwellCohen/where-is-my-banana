@@ -1,0 +1,8 @@
+{
+  "dates": ["moment", "dayjs", "date-fns", "luxon"],
+  "icons": ["react-icons", "lucide-react", "@mui/icons-material", "@heroicons/react"],
+  "utils": ["lodash", "lodash-es", "ramda", "underscore"],
+  "http": ["axios", "ky", "superagent", "node-fetch"],
+  "state": ["redux", "zustand", "jotai", "mobx", "recoil"],
+  "forms": ["formik", "react-hook-form", "final-form"]
+}

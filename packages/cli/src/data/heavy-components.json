@@ -1,0 +1,15 @@
+[
+  "recharts",
+  "chart.js",
+  "echarts",
+  "monaco-editor",
+  "@monaco-editor/react",
+  "codemirror",
+  "@codemirror/view",
+  "@tiptap/react",
+  "@tiptap/starter-kit",
+  "leaflet",
+  "mapbox-gl",
+  "three",
+  "@react-three/fiber"
+]

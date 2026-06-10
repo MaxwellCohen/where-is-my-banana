@@ -1,0 +1,33 @@
+import { describe, it, expect } from "vitest";
+import { join } from "node:path";
+import { scan } from "../src/scan.js";
+import { readFileSync, existsSync } from "node:fs";
+import { fixturePath } from "./helpers.js";
+
+describe("e2e scan", () => {
+  it("detects seeded violations in e2e fixture", async () => {
+    const projectRoot = fixturePath("e2e-app");
+    const code = await scan({ projectRoot, formats: ["json"] });
+    expect(existsSync(join(projectRoot, "wimb-report.json"))).toBe(true);
+    const report = JSON.parse(readFileSync(join(projectRoot, "wimb-report.json"), "utf-8"));
+    const ruleIds = report.findings.map((f: { ruleId: string }) => f.ruleId);
+    expect(ruleIds).toContain("server-logic-in-client");
+    expect(ruleIds).toContain("barrel-import");
+    expect(ruleIds).toContain("env-var-misuse");
+    expect(code).toBe(1);
+  });
+});
+
+describe("use-client-unnecessary fixture", () => {
+  it("flags unnecessary use client", async () => {
+    const { runScanOnFixture } = await import("./helpers.js");
+    const findings = await runScanOnFixture("use-client-unnecessary");
+    expect(findings.some((f) => f.ruleId === "use-client-unnecessary")).toBe(true);
+  });
+
+  it("clean variant passes", async () => {
+    const { runScanOnFixture } = await import("./helpers.js");
+    const findings = await runScanOnFixture("use-client-unnecessary/clean");
+    expect(findings.some((f) => f.ruleId === "use-client-unnecessary")).toBe(false);
+  });
+});

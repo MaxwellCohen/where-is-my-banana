@@ -1,0 +1,13 @@
+{
+  "name": "where-is-my-banana",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --filter @wimb/cli build",
+    "test": "pnpm --filter @wimb/cli test",
+    "dev": "pnpm --filter @wimb/cli dev"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

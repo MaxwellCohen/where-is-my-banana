@@ -1,0 +1,15 @@
+[
+  "pg",
+  "mysql2",
+  "mongoose",
+  "@prisma/client",
+  "drizzle-orm",
+  "ioredis",
+  "nodemailer",
+  "@aws-sdk/client-s3",
+  "@aws-sdk/client-dynamodb",
+  "stripe",
+  "better-sqlite3",
+  "knex",
+  "typeorm"
+]

@@ -1,0 +1,12 @@
+[
+  "lodash",
+  "lodash-es",
+  "react-icons",
+  "@mui/icons-material",
+  "date-fns",
+  "ramda",
+  "antd",
+  "lucide-react",
+  "@heroicons/react",
+  "@tabler/icons-react"
+]
