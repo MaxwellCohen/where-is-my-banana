@@ -10,6 +10,7 @@ import { buildReport, writeReports, exitCodeForReport } from "./report/index.js"
 import { printFindingsToTerminal } from "./report/terminal.js";
 import { validateProject } from "./validate.js";
 import { runE18eAnalysis } from "./external/e18e.js";
+import { runKnipUnusedDependencyAnalysis } from "./external/knip.js";
 
 export interface ScanOptions {
   projectRoot: string;
@@ -71,6 +72,10 @@ export async function scan(opts: ScanOptions): Promise<number> {
 
   for (const rule of getAllRules()) {
     rule.run(ctx);
+  }
+
+  if (!shouldIgnore("unused-dependency")) {
+    findings.push(...(await runKnipUnusedDependencyAnalysis(projectRoot, config)));
   }
 
   if (opts.e18e) {
