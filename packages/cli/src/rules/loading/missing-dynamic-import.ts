@@ -51,7 +51,7 @@ export const missingDynamicImport: Rule = {
             loc: imp.loc,
             message: "Large local module statically imported — candidate for next/dynamic",
             evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes },
-            estimatedBytes: target.subtreeBytes(),
+            estimatedBytes: target.subtreeBytes,
             fixStrategy: {
               name: "conditional-dynamic",
               steps: [
