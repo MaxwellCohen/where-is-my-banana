@@ -1,5 +1,6 @@
 {
   "name": "where-is-my-banana",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
