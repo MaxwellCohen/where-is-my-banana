@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize } from "../helpers.js";
+import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
 import { relPath } from "../../graph/builder.js";
 
 export const transitiveHeavyDependency: Rule = {
@@ -17,6 +17,7 @@ export const transitiveHeavyDependency: Rule = {
     }
 
     for (const [pkg, size] of ctx.pkg.installSizes) {
+      if (isFrameworkPackage(ctx, pkg)) continue;
       const isHeavy = size > heavyPackageBytes || ctx.data.heavyPackages.has(pkg);
       if (!isHeavy) continue;
       const inClient = [...ctx.graph.clientModules].some((p) => {

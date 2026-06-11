@@ -22,6 +22,10 @@ export function clientModules(ctx: RuleContext): Module[] {
     .filter(Boolean);
 }
 
+export function isFrameworkPackage(ctx: RuleContext, packageName: string): boolean {
+  return ctx.data.frameworkPackages.has(packageName);
+}
+
 export function isIgnored(ctx: RuleContext, ruleId: string, file: string): boolean {
   if (ctx.config.ignores.rules.includes(ruleId)) return true;
   return ctx.config.ignores.files.some((p) => file.includes(p));

@@ -73,6 +73,7 @@ export interface PackageInfo {
 
 export interface DataTables {
   heavyPackages: Set<string>;
+  frameworkPackages: Set<string>;
   categoryMap: Record<string, string[]>;
   serverPackages: Set<string>;
   authCryptoPackages: Set<string>;

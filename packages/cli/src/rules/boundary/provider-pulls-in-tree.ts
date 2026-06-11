@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize } from "../helpers.js";
+import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
 
 export const providerPullsInTree: Rule = {
   id: "provider-pulls-in-tree",
@@ -14,9 +14,14 @@ export const providerPullsInTree: Rule = {
         (i) => i.namedSymbols.some((s) => /Provider$/.test(s)) || /provider/i.test(i.specifier),
       );
       if (!isProvider && mod.signals.jsxElements < 2) continue;
-      const nonReactImports = mod.imports.filter((i) => i.packageName && i.packageName !== "react");
+      const nonReactImports = mod.imports.filter(
+        (i) => i.packageName && i.packageName !== "react" && !isFrameworkPackage(ctx, i.packageName),
+      );
       const heavyImport = mod.imports.find(
-        (i) => i.packageName && getInstallSize(ctx, i.packageName) > providerMaxInstallSize,
+        (i) =>
+          i.packageName &&
+          !isFrameworkPackage(ctx, i.packageName) &&
+          getInstallSize(ctx, i.packageName) > providerMaxInstallSize,
       );
       if (nonReactImports.length <= providerMinImports && !heavyImport) continue;
 

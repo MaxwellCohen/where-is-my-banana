@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, estimatedBytes } from "../helpers.js";
+import { makeFinding, isIgnored, estimatedBytes, isFrameworkPackage } from "../helpers.js";
 
 export const heavyClientImport: Rule = {
   id: "heavy-client-import",
@@ -12,6 +12,7 @@ export const heavyClientImport: Rule = {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         if (!imp.packageName || seen.has(`${path}:${imp.packageName}`)) continue;
+        if (isFrameworkPackage(ctx, imp.packageName)) continue;
         const size = estimatedBytes(ctx, imp.packageName);
         const isHeavy =
           size > heavyPackageBytes || ctx.data.heavyPackages.has(imp.packageName);

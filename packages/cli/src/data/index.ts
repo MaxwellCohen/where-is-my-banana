@@ -1,4 +1,5 @@
 import heavyPackages from "./heavy-packages.json" with { type: "json" };
+import frameworkPackages from "./framework-packages.json" with { type: "json" };
 import categoryMap from "./category-map.json" with { type: "json" };
 import serverPackages from "./server-packages.json" with { type: "json" };
 import authCryptoPackages from "./auth-crypto-packages.json" with { type: "json" };
@@ -37,6 +38,7 @@ const LOCALE_PATTERNS = [
 export function loadDataTables(): DataTables {
   return {
     heavyPackages: new Set(heavyPackages),
+    frameworkPackages: new Set(frameworkPackages),
     categoryMap: categoryMap as Record<string, string[]>,
     serverPackages: new Set(serverPackages),
     authCryptoPackages: new Set(authCryptoPackages),

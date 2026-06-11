@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize } from "../helpers.js";
+import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
 
 export const middlewareHeavyImports: Rule = {
   id: "middleware-heavy-imports",
@@ -17,7 +17,7 @@ export const middlewareHeavyImports: Rule = {
           const dep = ctx.graph.modules.get(imp.resolvedPath);
           if (dep) closureBytes += dep.sourceBytes;
         }
-        if (imp.packageName) {
+        if (imp.packageName && !isFrameworkPackage(ctx, imp.packageName)) {
           const size = getInstallSize(ctx, imp.packageName);
           if (size > middlewarePackageBytes) heavyPkgs.push(imp.packageName);
         }
