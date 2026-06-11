@@ -1,6 +1,6 @@
 # Where Is My Banana (WIMB)
 
-A TypeScript CLI that detects unnecessary client-side code in Next.js App Router + Turbopack apps.
+A TypeScript CLI that detects unnecessary client-side code in Next.js App Router + Turbopack apps. Because when I want a banana I only want a banana not everything else. 
 
 ## Quick start
 
