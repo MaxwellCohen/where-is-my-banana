@@ -1,5 +1,6 @@
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveOutputDir } from "../paths.js";
 import type { ScanReport, Finding, Severity } from "../types.js";
 import { toMarkdown } from "./markdown.js";
 import { toSarif } from "./sarif.js";
@@ -46,14 +47,17 @@ export function writeReports(
   report: ScanReport,
   formats: Set<string>,
 ): void {
+  const outputDir = resolveOutputDir(projectRoot);
+  mkdirSync(outputDir, { recursive: true });
+
   if (formats.has("json") || formats.size === 0) {
-    writeFileSync(join(projectRoot, "wimb-report.json"), JSON.stringify(report, null, 2));
+    writeFileSync(join(outputDir, "wimb-report.json"), JSON.stringify(report, null, 2));
   }
   if (formats.has("md") || formats.size === 0) {
-    writeFileSync(join(projectRoot, "wimb-report.md"), toMarkdown(report));
+    writeFileSync(join(outputDir, "wimb-report.md"), toMarkdown(report));
   }
   if (formats.has("sarif")) {
-    writeFileSync(join(projectRoot, "wimb-report.sarif"), JSON.stringify(toSarif(report), null, 2));
+    writeFileSync(join(outputDir, "wimb-report.sarif"), JSON.stringify(toSarif(report), null, 2));
   }
 }
 
@@ -64,10 +68,8 @@ export function exitCodeForReport(report: ScanReport, threshold: Severity = "err
 }
 
 function byteDedupeKey(f: Finding): string {
-  const evidence = f.evidence ?? {};
-  return (
-    (typeof evidence.package === "string" && evidence.package) ||
-    (typeof evidence.module === "string" && evidence.module) ||
-    `${f.ruleId}:${f.file}`
-  );
+  const { package: pkg, module: mod } = f.evidence;
+  if (typeof pkg === "string" && pkg) return pkg;
+  if (typeof mod === "string" && mod) return mod;
+  return `${f.ruleId}:${f.file}`;
 }

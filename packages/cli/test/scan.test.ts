@@ -8,8 +8,8 @@ describe("e2e scan", () => {
   it("detects seeded violations in e2e fixture", async () => {
     const projectRoot = fixturePath("e2e-app");
     const code = await scan({ projectRoot, formats: ["json"] });
-    expect(existsSync(join(projectRoot, "wimb-report.json"))).toBe(true);
-    const report = JSON.parse(readFileSync(join(projectRoot, "wimb-report.json"), "utf-8"));
+    expect(existsSync(join(projectRoot, ".wimb", "wimb-report.json"))).toBe(true);
+    const report = JSON.parse(readFileSync(join(projectRoot, ".wimb", "wimb-report.json"), "utf-8"));
     const ruleIds = report.findings.map((f: { ruleId: string }) => f.ruleId);
     expect(ruleIds).toContain("server-logic-in-client");
     expect(ruleIds).toContain("barrel-import");

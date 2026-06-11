@@ -2,7 +2,5 @@ node_modules/
 dist/
 .next/
 *.tsbuildinfo
-wimb-report.json
-wimb-report.md
-wimb-report.sarif
+.wimb/
 .DS_Store

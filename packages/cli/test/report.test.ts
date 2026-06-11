@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildReport } from "../src/report/index.js";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { buildReport, writeReports } from "../src/report/index.js";
 import type { Finding } from "../src/types.js";
 
 describe("buildReport", () => {
@@ -33,5 +36,20 @@ describe("buildReport", () => {
 
     const report = buildReport("/tmp", "source", findings);
     expect(report.summary.estimatedClientBytes).toBe(1000);
+  });
+});
+
+describe("writeReports", () => {
+  it("writes reports under .wimb/", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "wimb-report-"));
+    const report = buildReport(projectRoot, "source", []);
+
+    writeReports(projectRoot, report, new Set(["json", "md"]));
+
+    expect(existsSync(join(projectRoot, ".wimb", "wimb-report.json"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".wimb", "wimb-report.md"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(projectRoot, ".wimb", "wimb-report.json"), "utf-8")).findings).toEqual(
+      [],
+    );
   });
 });

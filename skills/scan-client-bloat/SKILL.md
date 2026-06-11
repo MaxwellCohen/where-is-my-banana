@@ -1,7 +1,7 @@
 ---
 name: scan-client-bloat
 description: >-
-  Run wimb scan on a Next.js App Router project, interpret wimb-report.json,
+  Run wimb scan on a Next.js App Router project, interpret .wimb/wimb-report.json,
   and prioritize findings by bytes × confidence. Use when auditing client
   bundle bloat, unnecessary use client boundaries, or before fixing findings
   with fix-client-bloat.
@@ -37,7 +37,9 @@ Install if needed: `pnpm add -D @wimb/cli` or use the monorepo `dist/index.js` d
 
 ## Read the report
 
-Primary contract: `wimb-report.json`
+All scan output lives in `.wimb/` at the project root.
+
+Primary contract: `.wimb/wimb-report.json`
 
 ```json
 {
@@ -53,7 +55,7 @@ Primary contract: `wimb-report.json`
 }
 ```
 
-Human summary: `wimb-report.md`
+Human summary: `.wimb/wimb-report.md`
 
 ## Prioritization
 
@@ -75,4 +77,4 @@ Act on `high` confidence directly. Verify `medium` before large refactors. Treat
 
 Route each `ruleId` to `skills/fix-client-bloat/references/<rule-id>.md` for remediation playbooks.
 
-Always re-run `wimb scan` after fixes and diff `wimb-report.json` to confirm resolution.
+Always re-run `wimb scan` after fixes and diff `.wimb/wimb-report.json` to confirm resolution.

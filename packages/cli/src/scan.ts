@@ -5,6 +5,7 @@ import { loadDataTables } from "./data/index.js";
 import { loadConfig, parseNextConfig } from "./config.js";
 import { getAllRules } from "./rules/index.js";
 import { runBuildAnalysis, resolveDistDir } from "./build/analyze.js";
+import { resolveOutputDir } from "./paths.js";
 import { buildReport, writeReports, exitCodeForReport } from "./report/index.js";
 import { validateProject } from "./validate.js";
 import { runE18eAnalysis } from "./external/e18e.js";
@@ -84,7 +85,7 @@ export async function scan(opts: ScanOptions): Promise<number> {
   writeReports(projectRoot, report, formats);
 
   console.log(
-    `wimb: ${report.summary.total} findings (${report.summary.bySeverity.error} errors, ${report.summary.bySeverity.warning} warnings)`,
+    `wimb: ${report.summary.total} findings (${report.summary.bySeverity.error} errors, ${report.summary.bySeverity.warning} warnings) → ${resolveOutputDir(projectRoot)}`,
   );
 
   return exitCodeForReport(report, opts.exitThreshold ?? "error");

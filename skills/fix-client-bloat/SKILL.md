@@ -3,7 +3,7 @@ name: fix-client-bloat
 description: >-
   Fix wimb scan findings in Next.js App Router projects. Routes by ruleId to
   per-rule playbooks with concrete remediation steps. Use after scan-client-bloat
-  or when the user shares wimb-report.json findings.
+  or when the user shares .wimb/wimb-report.json findings.
 ---
 
 # Fix Client Bloat
@@ -12,7 +12,7 @@ Remediate `wimb` findings using per-rule playbooks. Detection only — no codemo
 
 ## Workflow
 
-1. Run or read `wimb-report.json` (see `scan-client-bloat` skill)
+1. Run or read `.wimb/wimb-report.json` (see `scan-client-bloat` skill)
 2. Sort findings: `estimatedBytes × confidence × severity`
 3. For each finding, open `references/<rule-id>.md` in this skill directory
 4. Apply the playbook steps
@@ -60,7 +60,7 @@ After each fix batch:
 
 ```bash
 pnpm exec wimb scan --cwd <project-root>
-diff wimb-report.json wimb-report.json.bak  # or compare finding counts
+diff .wimb/wimb-report.json .wimb/wimb-report.json.bak  # or compare finding counts
 ```
 
 Target: zero `error` severity findings at `high` confidence for the touched rules.

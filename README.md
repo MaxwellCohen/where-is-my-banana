@@ -32,7 +32,7 @@ node packages/cli/dist/index.js scan --cwd /path/to/your-next-app
 cd packages/cli && node dist/index.js scan --cwd /path/to/your-next-app
 ```
 
-Reports are written into the **target app** directory (`wimb-report.json`, `wimb-report.md`).
+Reports are written to `.wimb/` in the **target app** directory.
 
 Rebuild after code changes:
 
@@ -60,18 +60,16 @@ wimb scan --format json,md,sarif
 
 ## Output
 
-Reports are written into the **target app** directory on every scan (existing files are overwritten):
+All generated output is written to `.wimb/` at the project root on every scan (existing files are overwritten):
 
-- `wimb-report.json` — stable schema for agents
-- `wimb-report.md` — human summary
-- `wimb-report.sarif` — code scanning integration
+- `.wimb/wimb-report.json` — stable schema for agents
+- `.wimb/wimb-report.md` — human summary
+- `.wimb/wimb-report.sarif` — code scanning integration (when `--format` includes `sarif`)
 
-Add these to your app's `.gitignore` if you do not want them committed:
+Add `.wimb/` to your app's `.gitignore` if you do not want reports committed:
 
 ```
-wimb-report.json
-wimb-report.md
-wimb-report.sarif
+.wimb/
 ```
 
 ## Configuration
