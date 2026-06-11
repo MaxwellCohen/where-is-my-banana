@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 
 export const duplicateDependencyCategory: Rule = {
   id: "duplicate-dependency-category",
@@ -10,8 +10,7 @@ export const duplicateDependencyCategory: Rule = {
       const present = packages.filter((p) => packageInClientGraph(ctx, p).length > 0);
       if (present.length < 2) continue;
       if (isIgnored(ctx, "duplicate-dependency-category", category)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `category:${category}:duplicate-dependency-category`,
           ruleId: "duplicate-dependency-category",
           category: "dependency",
@@ -30,8 +29,7 @@ export const duplicateDependencyCategory: Rule = {
               "Migrate call sites",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

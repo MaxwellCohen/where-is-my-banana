@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const wasmEagerLoad: Rule = {
   id: "wasm-eager-load",
   category: "loading",
   defaultSeverity: "warning",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         const isWasm =
@@ -14,8 +14,7 @@ export const wasmEagerLoad: Rule = {
           (imp.packageName && ctx.data.wasmPackages.has(imp.packageName));
         if (!isWasm || imp.isDynamic) continue;
         if (isIgnored(ctx, "wasm-eager-load", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:wasm-eager-load`,
             ruleId: "wasm-eager-load",
             category: "loading",
@@ -32,8 +31,7 @@ export const wasmEagerLoad: Rule = {
                 "Trigger inside the user interaction that needs WASM",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },

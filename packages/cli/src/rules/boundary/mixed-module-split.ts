@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const mixedModuleSplit: Rule = {
   id: "mixed-module-split",
@@ -7,6 +7,7 @@ export const mixedModuleSplit: Rule = {
   defaultSeverity: "error",
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (mod.env !== "shared") continue;
       if (isIgnored(ctx, "mixed-module-split", mod.filePath)) continue;
       for (const exp of mod.exports) {
@@ -20,8 +21,7 @@ export const mixedModuleSplit: Rule = {
           mod.signals.envReads.some((e) => !e.name.startsWith("NEXT_PUBLIC_"));
         if (!hasServerSignals) continue;
 
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${mod.filePath}:mixed-module-split:${exp.name}`,
             ruleId: "mixed-module-split",
             category: "boundary",
@@ -38,8 +38,7 @@ export const mixedModuleSplit: Rule = {
                 "Update importers",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },

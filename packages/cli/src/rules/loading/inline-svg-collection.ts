@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const inlineSvgCollection: Rule = {
   id: "inline-svg-collection",
@@ -7,13 +7,12 @@ export const inlineSvgCollection: Rule = {
   defaultSeverity: "info",
   run(ctx) {
     const { inlineSvgMinCount, inlineSvgMinBytes } = ctx.config.thresholds;
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (mod.signals.jsxElements < inlineSvgMinCount) continue;
       if (mod.sourceBytes < inlineSvgMinBytes) continue;
       if (isIgnored(ctx, "inline-svg-collection", path)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:inline-svg-collection`,
           ruleId: "inline-svg-collection",
           category: "loading",
@@ -31,8 +30,7 @@ export const inlineSvgCollection: Rule = {
               "Or render SVGs server-side",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

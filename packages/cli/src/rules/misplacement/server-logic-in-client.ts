@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const serverLogicInClient: Rule = {
   id: "server-logic-in-client",
   category: "misplacement",
   defaultSeverity: "error",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (isIgnored(ctx, "server-logic-in-client", path)) continue;
       const serverImports = mod.imports.filter(
@@ -15,8 +15,7 @@ export const serverLogicInClient: Rule = {
       const secretEnv = mod.signals.envReads.filter((e) => !e.name.startsWith("NEXT_PUBLIC_"));
       if (!mod.signals.nodeBuiltins.length && !serverImports.length && !secretEnv.length) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:server-logic-in-client`,
           ruleId: "server-logic-in-client",
           category: "misplacement",
@@ -39,8 +38,7 @@ export const serverLogicInClient: Rule = {
               "Move the import behind that boundary",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

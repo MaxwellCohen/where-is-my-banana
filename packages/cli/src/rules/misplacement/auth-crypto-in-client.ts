@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const authCryptoInClient: Rule = {
   id: "auth-crypto-in-client",
   category: "misplacement",
   defaultSeverity: "error",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (isIgnored(ctx, "auth-crypto-in-client", path)) continue;
       const authImports = mod.imports.filter(
@@ -17,8 +17,7 @@ export const authCryptoInClient: Rule = {
       );
       if (!authImports.length && !schemaImport) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:auth-crypto-in-client`,
           ruleId: "auth-crypto-in-client",
           category: "misplacement",
@@ -39,8 +38,7 @@ export const authCryptoInClient: Rule = {
               "Use server actions or route handlers for auth flows",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

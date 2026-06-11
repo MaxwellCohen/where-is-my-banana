@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const staticContentRenderedClient: Rule = {
   id: "static-content-rendered-client",
   category: "misplacement",
   defaultSeverity: "warning",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (!mod.isBoundary) continue;
       const renderer = mod.imports.find(
@@ -17,8 +17,7 @@ export const staticContentRenderedClient: Rule = {
       if (hasUserInput && mod.signals.eventHandlers.length > 2) continue;
       if (isIgnored(ctx, "static-content-rendered-client", path)) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:static-content-rendered-client`,
           ruleId: "static-content-rendered-client",
           category: "misplacement",
@@ -36,8 +35,7 @@ export const staticContentRenderedClient: Rule = {
               "Keep client renderer only for live-editing use cases",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

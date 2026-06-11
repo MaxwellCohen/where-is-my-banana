@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { join } from "node:path";
 import { heavyClientImport } from "../../src/rules/dependency/heavy-client-import.js";
 import { DEFAULT_CONFIG } from "../../src/config.js";
 import { loadDataTables } from "../../src/data/index.js";
@@ -7,7 +8,8 @@ import { fixturePath } from "../helpers.js";
 import { loadPackageInfo } from "../../src/graph/package-info.js";
 
 function makeCtx(imports: Import[]): { ctx: RuleContext; findings: ReturnType<RuleContext["report"]> extends void ? never[] : Parameters<RuleContext["report"]>[0][] } {
-  const filePath = "/app/components/widget.tsx";
+  const projectRoot = fixturePath("e2e-app");
+  const filePath = join(projectRoot, "components/widget.tsx");
   const mod: Module = {
     filePath,
     env: "client",
@@ -23,7 +25,7 @@ function makeCtx(imports: Import[]): { ctx: RuleContext; findings: ReturnType<Ru
   const findings: Parameters<RuleContext["report"]>[0][] = [];
   const installSizes = new Map([["next", 1_000_000], ["lodash", 1_000_000]]);
   const ctx: RuleContext = {
-    projectRoot: fixturePath("e2e-app"),
+    projectRoot,
     graph: {
       modules: new Map([[filePath, mod]]),
       entries: [],

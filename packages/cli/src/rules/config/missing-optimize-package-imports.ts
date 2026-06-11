@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 import { NEXT_BUILTIN_OPTIMIZE } from "../../config.js";
 
 export const missingOptimizePackageImports: Rule = {
@@ -15,8 +15,7 @@ export const missingOptimizePackageImports: Rule = {
       if (configured.has(pkg)) continue;
       if (!packageInClientGraph(ctx, pkg).length) continue;
       if (isIgnored(ctx, "missing-optimize-package-imports", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `config:missing-optimize-package-imports:${pkg}`,
           ruleId: "missing-optimize-package-imports",
           category: "config",
@@ -31,8 +30,7 @@ export const missingOptimizePackageImports: Rule = {
               `Add '${pkg}' to experimental.optimizePackageImports in next.config`,
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

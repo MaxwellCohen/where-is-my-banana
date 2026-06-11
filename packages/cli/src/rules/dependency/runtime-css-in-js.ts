@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 
 const CSS_IN_JS = ["styled-components", "@emotion/react", "@emotion/styled"];
 
@@ -12,8 +12,7 @@ export const runtimeCssInJs: Rule = {
       const files = packageInClientGraph(ctx, pkg);
       if (!files.length) continue;
       if (isIgnored(ctx, "runtime-css-in-js", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:runtime-css-in-js`,
           ruleId: "runtime-css-in-js",
           category: "dependency",
@@ -29,8 +28,7 @@ export const runtimeCssInJs: Rule = {
               "Low priority — opinionated suggestion",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

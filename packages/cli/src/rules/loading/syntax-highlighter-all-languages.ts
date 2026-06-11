@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const syntaxHighlighterAllLanguages: Rule = {
   id: "syntax-highlighter-all-languages",
   category: "loading",
   defaultSeverity: "warning",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         const isFullHljs =
@@ -14,8 +14,7 @@ export const syntaxHighlighterAllLanguages: Rule = {
         const isShikiBundle = /shiki/.test(imp.specifier) && !imp.specifier.includes("/");
         if (!isFullHljs && !isShikiBundle) continue;
         if (isIgnored(ctx, "syntax-highlighter-all-languages", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:syntax-highlighter-all-languages`,
             ruleId: "syntax-highlighter-all-languages",
             category: "loading",
@@ -32,8 +31,7 @@ export const syntaxHighlighterAllLanguages: Rule = {
                 "Or move highlighting server-side",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },

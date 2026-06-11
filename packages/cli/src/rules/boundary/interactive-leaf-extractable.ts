@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const interactiveLeafExtractable: Rule = {
   id: "interactive-leaf-extractable",
@@ -8,6 +8,7 @@ export const interactiveLeafExtractable: Rule = {
   run(ctx) {
     const { interactiveLeafRatio } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (mod.sourceBytes <= 8192) continue;
       if (isIgnored(ctx, "interactive-leaf-extractable", mod.filePath)) continue;
@@ -16,8 +17,7 @@ export const interactiveLeafExtractable: Rule = {
       const ratio = interactive / Math.max(mod.sourceBytes / 100, 1);
       if (ratio >= interactiveLeafRatio * 100) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:interactive-leaf-extractable`,
           ruleId: "interactive-leaf-extractable",
           category: "boundary",
@@ -34,8 +34,7 @@ export const interactiveLeafExtractable: Rule = {
               "Remove 'use client' from the parent",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

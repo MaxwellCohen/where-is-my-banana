@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const staticIconMap: Rule = {
   id: "static-icon-map",
@@ -7,7 +7,7 @@ export const staticIconMap: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     const { iconMapMinEntries } = ctx.config.thresholds;
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       const iconImports = mod.imports.filter(
         (i) =>
@@ -17,8 +17,7 @@ export const staticIconMap: Rule = {
       );
       if (iconImports.length < iconMapMinEntries) continue;
       if (isIgnored(ctx, "static-icon-map", path)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:static-icon-map`,
           ruleId: "static-icon-map",
           category: "dependency",
@@ -34,8 +33,7 @@ export const staticIconMap: Rule = {
               "Or a lazy map of dynamic(() => import(...)) entries",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

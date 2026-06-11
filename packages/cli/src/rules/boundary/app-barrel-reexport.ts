@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const appBarrelReexport: Rule = {
   id: "app-barrel-reexport",
@@ -8,6 +8,7 @@ export const appBarrelReexport: Rule = {
   run(ctx) {
     const { barrelReexportRatio, barrelMinReexports } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (isIgnored(ctx, "app-barrel-reexport", mod.filePath)) continue;
       const reexports = mod.imports.filter(
         (i) => i.namedSymbols.includes("*") || i.specifier.startsWith("."),
@@ -19,8 +20,7 @@ export const appBarrelReexport: Rule = {
       const usedByClient = mod.dependents.some((d) => ctx.graph.clientModules.has(d));
       if (!usedByClient) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:app-barrel-reexport`,
           ruleId: "app-barrel-reexport",
           category: "boundary",
@@ -36,8 +36,7 @@ export const appBarrelReexport: Rule = {
               "Optionally delete the barrel",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

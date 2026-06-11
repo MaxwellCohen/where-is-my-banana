@@ -1,19 +1,18 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const localeDataBloat: Rule = {
   id: "locale-data-bloat",
   category: "loading",
   defaultSeverity: "error",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         const matches = ctx.data.localePatterns.some((p) => p.test(imp.specifier));
         if (!matches) continue;
         if (isIgnored(ctx, "locale-data-bloat", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:locale-data-bloat`,
             ruleId: "locale-data-bloat",
             category: "loading",
@@ -31,8 +30,7 @@ export const localeDataBloat: Rule = {
                 "For timezones use Intl.DateTimeFormat or moment-timezone/builds subsets",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },

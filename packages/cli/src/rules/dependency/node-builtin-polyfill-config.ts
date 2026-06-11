@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, isIgnored } from "../helpers.js";
 
 const SHIM_PACKAGES = ["buffer", "process", "crypto-browserify", "stream-browserify", "events"];
 
@@ -9,8 +9,7 @@ export const nodeBuiltinPolyfillConfig: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     if (ctx.nextConfig?.webpackFallbacks.length) {
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: "next-config:webpack-fallback",
           ruleId: "node-builtin-polyfill-config",
           category: "dependency",
@@ -26,14 +25,12 @@ export const nodeBuiltinPolyfillConfig: Rule = {
               "Move server logic server-side instead of shimming",
             ],
           },
-        }),
-      );
+        });
     }
     for (const pkg of SHIM_PACKAGES) {
       if (!ctx.pkg.dependencies[pkg]) continue;
       if (isIgnored(ctx, "node-builtin-polyfill-config", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:node-builtin-polyfill-config`,
           ruleId: "node-builtin-polyfill-config",
           category: "dependency",
@@ -50,8 +47,7 @@ export const nodeBuiltinPolyfillConfig: Rule = {
               "Remove shim dependency",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

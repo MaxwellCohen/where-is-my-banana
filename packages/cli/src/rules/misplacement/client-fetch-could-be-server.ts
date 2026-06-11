@@ -1,12 +1,12 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const clientFetchCouldBeServer: Rule = {
   id: "client-fetch-could-be-server",
   category: "misplacement",
   defaultSeverity: "warning",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "client-fetch-could-be-server", path)) continue;
@@ -17,8 +17,7 @@ export const clientFetchCouldBeServer: Rule = {
       const isPage = /\/page\.(t|j)sx?$/.test(path);
       if (!hasFetchEffect && !(hasDataLib && isPage)) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:client-fetch-could-be-server`,
           ruleId: "client-fetch-could-be-server",
           category: "misplacement",
@@ -35,8 +34,7 @@ export const clientFetchCouldBeServer: Rule = {
               "Remove fetching library if unused elsewhere",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

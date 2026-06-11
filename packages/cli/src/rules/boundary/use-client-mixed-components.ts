@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const useClientMixedComponents: Rule = {
   id: "use-client-mixed-components",
@@ -7,6 +7,7 @@ export const useClientMixedComponents: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "use-client-mixed-components", mod.filePath)) continue;
       const comps = mod.signals.components;
@@ -15,8 +16,7 @@ export const useClientMixedComponents: Rule = {
       const withoutSignals = comps.filter((c) => c.signals === 0);
       if (!withSignals.length || !withoutSignals.length) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:use-client-mixed-components`,
           ruleId: "use-client-mixed-components",
           category: "boundary",
@@ -35,8 +35,7 @@ export const useClientMixedComponents: Rule = {
               "Update imports/re-exports",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

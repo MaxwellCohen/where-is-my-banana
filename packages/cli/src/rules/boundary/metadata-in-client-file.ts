@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const metadataInClientFile: Rule = {
   id: "metadata-in-client-file",
@@ -7,6 +7,7 @@ export const metadataInClientFile: Rule = {
   defaultSeverity: "error",
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "metadata-in-client-file", mod.filePath)) continue;
       const hasMetadata = mod.exports.some(
@@ -14,8 +15,7 @@ export const metadataInClientFile: Rule = {
       );
       if (!hasMetadata) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:metadata-in-client-file`,
           ruleId: "metadata-in-client-file",
           category: "boundary",
@@ -31,8 +31,7 @@ export const metadataInClientFile: Rule = {
               "Or split the file into server + client parts",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

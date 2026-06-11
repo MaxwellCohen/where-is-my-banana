@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 const SECRET_PATTERN = /(secret|private|service[_-]?role|api[_-]?key|token|password)/i;
 const PUBLIC_ALLOW = /_PUBLISHABLE_KEY$|_SITE_KEY$/;
@@ -9,14 +9,13 @@ export const envVarMisuse: Rule = {
   category: "misplacement",
   defaultSeverity: "error",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       if (isIgnored(ctx, "env-var-misuse", path)) continue;
       for (const env of mod.signals.envReads) {
         if (env.name.startsWith("NEXT_PUBLIC_")) {
           if (SECRET_PATTERN.test(env.name) && !PUBLIC_ALLOW.test(env.name)) {
-            ctx.report(
-              makeFinding(ctx, {
+            reportFinding(ctx, {
                 id: `${path}:env-var-misuse:public-secret`,
                 ruleId: "env-var-misuse",
                 category: "misplacement",
@@ -33,12 +32,10 @@ export const envVarMisuse: Rule = {
                     "Rotate the credential immediately",
                   ],
                 },
-              }),
-            );
+              });
           }
         } else {
-          ctx.report(
-            makeFinding(ctx, {
+          reportFinding(ctx, {
               id: `${path}:env-var-misuse:non-public`,
               ruleId: "env-var-misuse",
               category: "misplacement",
@@ -55,8 +52,7 @@ export const envVarMisuse: Rule = {
                   "Otherwise restructure to read server-side",
                 ],
               },
-            }),
-          );
+            });
         }
       }
     }

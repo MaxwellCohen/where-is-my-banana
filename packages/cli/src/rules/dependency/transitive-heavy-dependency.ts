@@ -1,5 +1,5 @@
-import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
+import type { Rule, RuleContext } from "../../types.js";
+import { reportFinding, projectClientModulePaths, isIgnored, isFrameworkPackage } from "../helpers.js";
 import { relPath } from "../../graph/builder.js";
 
 export const transitiveHeavyDependency: Rule = {
@@ -9,7 +9,7 @@ export const transitiveHeavyDependency: Rule = {
   run(ctx) {
     const { heavyPackageBytes } = ctx.config.thresholds;
     const directImports = new Set<string>();
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         if (imp.packageName) directImports.add(imp.packageName);
@@ -29,8 +29,7 @@ export const transitiveHeavyDependency: Rule = {
       if (isIgnored(ctx, "transitive-heavy-dependency", pkg)) continue;
 
       const chain = findChain(ctx, pkg);
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:transitive-heavy-dependency`,
           ruleId: "transitive-heavy-dependency",
           category: "dependency",
@@ -47,16 +46,16 @@ export const transitiveHeavyDependency: Rule = {
               "Check replaceable-dependency findings for the intermediate",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };
 
-function findChain(ctx: { graph: { clientModules: Set<string>; modules: Map<string, { filePath: string; imports: { packageName: string | null; resolvedPath: string | null }[] }> } }, pkg: string): string[] {
-  for (const path of ctx.graph.clientModules) {
+function findChain(ctx: RuleContext, pkg: string): string[] {
+  for (const path of projectClientModulePaths(ctx)) {
     const mod = ctx.graph.modules.get(path)!;
-    if (mod.imports.some((i) => i.packageName === pkg)) return [mod.filePath];
+    const imp = mod.imports.find((i) => i.packageName === pkg);
+    if (imp) return [mod.filePath];
   }
   return [];
 }

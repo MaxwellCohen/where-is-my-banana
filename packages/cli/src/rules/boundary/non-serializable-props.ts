@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const nonSerializableProps: Rule = {
   id: "non-serializable-props",
@@ -7,6 +7,7 @@ export const nonSerializableProps: Rule = {
   defaultSeverity: "error",
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (mod.env !== "server") continue;
       if (isIgnored(ctx, "non-serializable-props", mod.filePath)) continue;
       const importsBoundary = mod.imports.some((i) => {
@@ -21,8 +22,7 @@ export const nonSerializableProps: Rule = {
       );
       if (!hasNonSerializable) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:non-serializable-props`,
           ruleId: "non-serializable-props",
           category: "boundary",
@@ -39,8 +39,7 @@ export const nonSerializableProps: Rule = {
               "Or use a server action for callbacks",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

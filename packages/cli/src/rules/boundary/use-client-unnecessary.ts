@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, isIgnored, isProjectSource } from "../helpers.js";
 import { isClientOnlyPackage } from "../../graph/builder.js";
 
 export const useClientUnnecessary: Rule = {
@@ -9,6 +9,7 @@ export const useClientUnnecessary: Rule = {
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
       if (!mod.isBoundary) continue;
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (isIgnored(ctx, "use-client-unnecessary", mod.filePath)) continue;
       const { hooks, eventHandlers, browserGlobals } = mod.signals;
       if (hooks.length || eventHandlers.length || browserGlobals.length) continue;
@@ -17,8 +18,7 @@ export const useClientUnnecessary: Rule = {
       );
       if (hasClientPkg) continue;
       const hasReexports = mod.imports.some((i) => i.namedSymbols.includes("*"));
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:use-client-unnecessary`,
           ruleId: "use-client-unnecessary",
           category: "boundary",
@@ -34,8 +34,7 @@ export const useClientUnnecessary: Rule = {
               "Run build/typecheck to confirm no descendant needed the boundary",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

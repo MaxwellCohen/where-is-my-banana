@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 const ASSET_EXTS = /\.(png|jpe?g|gif|mp4|woff2?)$/i;
 
@@ -9,13 +9,12 @@ export const assetInBundle: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     const { base64MinBytes } = ctx.config.thresholds;
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         if (!ASSET_EXTS.test(imp.specifier) && !/@fontsource/.test(imp.specifier)) continue;
         if (isIgnored(ctx, "asset-in-bundle", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:asset-in-bundle`,
             ruleId: "asset-in-bundle",
             category: "loading",
@@ -32,12 +31,10 @@ export const assetInBundle: Rule = {
                 "Use next/font for fonts",
               ],
             },
-          }),
-        );
+          });
       }
       if (mod.signals.largestLiteralBytes > base64MinBytes) {
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:asset-in-bundle:base64`,
             ruleId: "asset-in-bundle",
             category: "loading",
@@ -51,8 +48,7 @@ export const assetInBundle: Rule = {
               name: "external-asset",
               steps: ["Move asset to public/ or use next/image"],
             },
-          }),
-        );
+          });
       }
     }
   },

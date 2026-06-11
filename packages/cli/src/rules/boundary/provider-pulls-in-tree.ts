@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
 
 export const providerPullsInTree: Rule = {
   id: "provider-pulls-in-tree",
@@ -8,6 +8,7 @@ export const providerPullsInTree: Rule = {
   run(ctx) {
     const { providerMinImports, providerMaxInstallSize } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "provider-pulls-in-tree", mod.filePath)) continue;
       const isProvider = mod.imports.some(
@@ -25,8 +26,7 @@ export const providerPullsInTree: Rule = {
       );
       if (nonReactImports.length <= providerMinImports && !heavyImport) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:provider-pulls-in-tree`,
           ruleId: "provider-pulls-in-tree",
           category: "boundary",
@@ -46,8 +46,7 @@ export const providerPullsInTree: Rule = {
               "Import everything else where it's used",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

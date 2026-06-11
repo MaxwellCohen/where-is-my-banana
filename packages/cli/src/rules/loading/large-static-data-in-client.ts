@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 export const largeStaticDataInClient: Rule = {
   id: "large-static-data-in-client",
@@ -7,7 +7,7 @@ export const largeStaticDataInClient: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     const { largeJsonBytes, largeLiteralBytes } = ctx.config.thresholds;
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       const jsonImport = mod.imports.find(
         (i) => i.resolvedPath?.endsWith(".json") && (ctx.graph.modules.get(i.resolvedPath!)?.sourceBytes ?? 0) > largeJsonBytes,
@@ -15,8 +15,7 @@ export const largeStaticDataInClient: Rule = {
       const largeLiteral = mod.signals.largestLiteralBytes > largeLiteralBytes;
       if (!jsonImport && !largeLiteral) continue;
       if (isIgnored(ctx, "large-static-data-in-client", path)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:large-static-data-in-client`,
           ruleId: "large-static-data-in-client",
           category: "loading",
@@ -36,8 +35,7 @@ export const largeStaticDataInClient: Rule = {
               "Fetch on demand or import() lazily",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

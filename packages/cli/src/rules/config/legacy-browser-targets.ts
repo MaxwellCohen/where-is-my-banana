@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, isIgnored } from "../helpers.js";
 
 const LEGACY_PATTERNS = /\bie\b|op_mini|last\s+2\s+versions|>?\s*0\.?\d+%/i;
 
@@ -21,8 +21,7 @@ export const legacyBrowserTargets: Rule = {
     }
     if (!query || !LEGACY_PATTERNS.test(query)) return;
     if (isIgnored(ctx, "legacy-browser-targets", "browserslist")) return;
-    ctx.report(
-      makeFinding(ctx, {
+    reportFinding(ctx, {
         id: "config:legacy-browser-targets",
         ruleId: "legacy-browser-targets",
         category: "config",
@@ -38,7 +37,6 @@ export const legacyBrowserTargets: Rule = {
             "Note Next's own default targets",
           ],
         },
-      }),
-    );
+      });
   },
 };

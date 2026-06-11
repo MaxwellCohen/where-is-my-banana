@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 import { loadReplacements } from "../../external/module-replacements.js";
 
 export const replaceableDependency: Rule = {
@@ -14,8 +14,7 @@ export const replaceableDependency: Rule = {
       if (!files.length || seen.has(pkg)) continue;
       seen.add(pkg);
       if (isIgnored(ctx, "replaceable-dependency", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:replaceable-dependency`,
           ruleId: "replaceable-dependency",
           category: "dependency",
@@ -31,8 +30,7 @@ export const replaceableDependency: Rule = {
               `Run: npx @e18e/cli migrate ${pkg}`,
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

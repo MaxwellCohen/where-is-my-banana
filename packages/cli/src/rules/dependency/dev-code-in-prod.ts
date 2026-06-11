@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 const TEST_PATTERNS = [/__mocks__\//, /\.test\./, /\.spec\./, /\.stories\./];
 
@@ -8,7 +8,7 @@ export const devCodeInProd: Rule = {
   category: "dependency",
   defaultSeverity: "error",
   run(ctx) {
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         const isDevPkg = imp.packageName && ctx.data.devPackages.has(imp.packageName);
@@ -16,8 +16,7 @@ export const devCodeInProd: Rule = {
           imp.resolvedPath && TEST_PATTERNS.some((p) => p.test(imp.resolvedPath!));
         if (!isDevPkg && !isTestPath) continue;
         if (isIgnored(ctx, "dev-code-in-prod", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:dev-code-in-prod`,
             ruleId: "dev-code-in-prod",
             category: "dependency",
@@ -34,8 +33,7 @@ export const devCodeInProd: Rule = {
                 "Or remove the import entirely",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },

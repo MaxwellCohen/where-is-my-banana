@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const rscPayloadBloat: Rule = {
   id: "rsc-payload-bloat",
@@ -8,6 +8,7 @@ export const rscPayloadBloat: Rule = {
   run(ctx) {
     const { rscPayloadMaxFields } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (mod.env !== "server") continue;
       if (isIgnored(ctx, "rsc-payload-bloat", mod.filePath)) continue;
       const passesToClient = mod.imports.some((i) => {
@@ -20,8 +21,7 @@ export const rscPayloadBloat: Rule = {
       );
       if (!hasAsyncData && mod.signals.largestLiteralBytes < 5000) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:rsc-payload-bloat`,
           ruleId: "rsc-payload-bloat",
           category: "boundary",
@@ -36,8 +36,7 @@ export const rscPayloadBloat: Rule = {
               "Pick/map only the needed fields server-side before passing as props",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

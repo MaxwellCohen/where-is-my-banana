@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored, getInstallSize, isFrameworkPackage } from "../helpers.js";
 
 export const middlewareHeavyImports: Rule = {
   id: "middleware-heavy-imports",
@@ -8,6 +8,7 @@ export const middlewareHeavyImports: Rule = {
   run(ctx) {
     const { middlewareSourceBytes, middlewarePackageBytes } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!/middleware\.(t|j)s$/.test(mod.filePath)) continue;
       if (isIgnored(ctx, "middleware-heavy-imports", mod.filePath)) continue;
       let closureBytes = mod.sourceBytes;
@@ -24,8 +25,7 @@ export const middlewareHeavyImports: Rule = {
       }
       if (closureBytes <= middlewareSourceBytes && !heavyPkgs.length) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:middleware-heavy-imports`,
           ruleId: "middleware-heavy-imports",
           category: "misplacement",
@@ -43,8 +43,7 @@ export const middlewareHeavyImports: Rule = {
               "Note Next edge bundle size limits",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

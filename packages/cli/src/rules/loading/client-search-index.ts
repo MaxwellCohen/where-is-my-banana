@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
 
 const SEARCH_LIBS = ["lunr", "flexsearch", "fuse.js", "minisearch"];
 
@@ -9,7 +9,7 @@ export const clientSearchIndex: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     const { searchIndexMinBytes } = ctx.config.thresholds;
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       const hasSearch = mod.imports.some((i) => i.packageName && SEARCH_LIBS.includes(i.packageName));
       if (!hasSearch) continue;
@@ -18,8 +18,7 @@ export const clientSearchIndex: Rule = {
       );
       if (!hasLargeData && mod.signals.largestLiteralBytes <= searchIndexMinBytes) continue;
       if (isIgnored(ctx, "client-search-index", path)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${path}:client-search-index`,
           ruleId: "client-search-index",
           category: "loading",
@@ -35,8 +34,7 @@ export const clientSearchIndex: Rule = {
               "Or move search to a route handler",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 import { relPath } from "../../graph/builder.js";
 
 export const useClientTooHigh: Rule = {
@@ -9,6 +9,7 @@ export const useClientTooHigh: Rule = {
   run(ctx) {
     const { subtreeBytesHigh, clientSignalRatio } = ctx.config.thresholds;
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "use-client-too-high", mod.filePath)) continue;
       const isHighFile =
@@ -23,8 +24,7 @@ export const useClientTooHigh: Rule = {
       if (subtree.length === 0) continue;
       if (withSignals.length / subtree.length >= clientSignalRatio) continue;
 
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `${mod.filePath}:use-client-too-high`,
           ruleId: "use-client-too-high",
           category: "boundary",
@@ -45,8 +45,7 @@ export const useClientTooHigh: Rule = {
               "Pass server-rendered content via children/props",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

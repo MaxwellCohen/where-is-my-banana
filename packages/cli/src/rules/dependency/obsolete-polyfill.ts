@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 import { loadNativeReplacements } from "../../external/module-replacements.js";
 
 export const obsoletePolyfill: Rule = {
@@ -12,8 +12,7 @@ export const obsoletePolyfill: Rule = {
       const files = packageInClientGraph(ctx, pkg);
       if (!files.length) continue;
       if (isIgnored(ctx, "obsolete-polyfill", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:obsolete-polyfill`,
           ruleId: "obsolete-polyfill",
           category: "dependency",
@@ -26,8 +25,7 @@ export const obsoletePolyfill: Rule = {
             name: "remove-polyfill",
             steps: [`Delete dependency '${pkg}'`, `Use native API: ${native}`],
           },
-        }),
-      );
+        });
     }
   },
 };

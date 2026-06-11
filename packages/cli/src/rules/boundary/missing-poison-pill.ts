@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 
 export const missingPoisonPill: Rule = {
   id: "missing-poison-pill",
@@ -7,6 +7,7 @@ export const missingPoisonPill: Rule = {
   defaultSeverity: "info",
   run(ctx) {
     for (const mod of ctx.graph.modules.values()) {
+      if (!isProjectSource(ctx, mod.filePath)) continue;
       if (isIgnored(ctx, "missing-poison-pill", mod.filePath)) continue;
       const hasServerSignals =
         mod.signals.nodeBuiltins.length > 0 ||
@@ -16,8 +17,7 @@ export const missingPoisonPill: Rule = {
         hasServerSignals &&
         !mod.directives.has("server-only")
       ) {
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${mod.filePath}:missing-poison-pill:server`,
             ruleId: "missing-poison-pill",
             category: "boundary",
@@ -30,16 +30,14 @@ export const missingPoisonPill: Rule = {
               name: "add-server-only",
               steps: ["Add import 'server-only' as the first import"],
             },
-          }),
-        );
+          });
       }
       if (
         mod.signals.browserGlobals.length > 0 &&
         mod.env === "server" &&
         !mod.directives.has("client-only")
       ) {
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${mod.filePath}:missing-poison-pill:client`,
             ruleId: "missing-poison-pill",
             category: "boundary",
@@ -52,8 +50,7 @@ export const missingPoisonPill: Rule = {
               name: "add-client-only",
               steps: ["Add import 'client-only' as the first import"],
             },
-          }),
-        );
+          });
       }
     }
   },

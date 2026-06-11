@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored } from "../helpers.js";
+import { reportFinding, isIgnored } from "../helpers.js";
 
 export const routeOverBudget: Rule = {
   id: "route-over-budget",
@@ -11,8 +11,7 @@ export const routeOverBudget: Rule = {
     for (const [route, bytes] of ctx.byteAttribution.routes) {
       if (bytes <= routeBudgetBytes) continue;
       if (isIgnored(ctx, "route-over-budget", route)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `route:${route}:route-over-budget`,
           ruleId: "route-over-budget",
           category: "config",
@@ -29,8 +28,7 @@ export const routeOverBudget: Rule = {
               "Address highest-confidence findings first",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, packageInClientGraph } from "../helpers.js";
+import { reportFinding, isIgnored, packageInClientGraph } from "../helpers.js";
 
 export const duplicateDependencyVersions: Rule = {
   id: "duplicate-dependency-versions",
@@ -11,8 +11,7 @@ export const duplicateDependencyVersions: Rule = {
       const files = packageInClientGraph(ctx, pkg);
       if (!files.length) continue;
       if (isIgnored(ctx, "duplicate-dependency-versions", pkg)) continue;
-      ctx.report(
-        makeFinding(ctx, {
+      reportFinding(ctx, {
           id: `pkg:${pkg}:duplicate-dependency-versions`,
           ruleId: "duplicate-dependency-versions",
           category: "dependency",
@@ -28,8 +27,7 @@ export const duplicateDependencyVersions: Rule = {
               "Verify a single version resolves",
             ],
           },
-        }),
-      );
+        });
     }
   },
 };

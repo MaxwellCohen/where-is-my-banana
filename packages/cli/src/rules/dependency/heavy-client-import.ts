@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { makeFinding, isIgnored, estimatedBytes, isFrameworkPackage } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored, estimatedBytes, isFrameworkPackage } from "../helpers.js";
 
 export const heavyClientImport: Rule = {
   id: "heavy-client-import",
@@ -8,7 +8,7 @@ export const heavyClientImport: Rule = {
   run(ctx) {
     const { heavyPackageBytes } = ctx.config.thresholds;
     const seen = new Set<string>();
-    for (const path of ctx.graph.clientModules) {
+    for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         if (!imp.packageName || seen.has(`${path}:${imp.packageName}`)) continue;
@@ -19,8 +19,7 @@ export const heavyClientImport: Rule = {
         if (!isHeavy) continue;
         seen.add(`${path}:${imp.packageName}`);
         if (isIgnored(ctx, "heavy-client-import", path)) continue;
-        ctx.report(
-          makeFinding(ctx, {
+        reportFinding(ctx, {
             id: `${path}:heavy-client-import:${imp.packageName}`,
             ruleId: "heavy-client-import",
             category: "dependency",
@@ -39,8 +38,7 @@ export const heavyClientImport: Rule = {
                 "Or use next/dynamic for on-demand loading",
               ],
             },
-          }),
-        );
+          });
       }
     }
   },
