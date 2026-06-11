@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildReport, writeReports } from "../src/report/index.js";
+import { formatFindingsForTerminal } from "../src/report/terminal.js";
 import type { Finding } from "../src/types.js";
 
 describe("buildReport", () => {
@@ -36,6 +37,34 @@ describe("buildReport", () => {
 
     const report = buildReport("/tmp", "source", findings);
     expect(report.summary.estimatedClientBytes).toBe(1000);
+  });
+});
+
+describe("formatFindingsForTerminal", () => {
+  it("formats findings with severity, location, and first fix step", () => {
+    const report = buildReport("/tmp", "source", [
+      {
+        id: "1",
+        ruleId: "heavy-client-import",
+        category: "dependency",
+        severity: "error",
+        confidence: "high",
+        file: "app/page.tsx",
+        loc: { line: 4, column: 1 },
+        message: "Heavy package 'lodash' imported in client graph",
+        evidence: { package: "lodash" },
+        estimatedBytes: 2048,
+        fixStrategy: {
+          name: "reduce-heavy-import",
+          steps: ["Use a lighter alternative if available", "Move usage server-side"],
+        },
+      },
+    ]);
+
+    const output = formatFindingsForTerminal(report);
+    expect(output).toContain("error   heavy-client-import  app/page.tsx:4 (2.0 KB)");
+    expect(output).toContain("Heavy package 'lodash' imported in client graph");
+    expect(output).toContain("→ Use a lighter alternative if available");
   });
 });
 

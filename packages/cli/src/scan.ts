@@ -7,6 +7,7 @@ import { getAllRules } from "./rules/index.js";
 import { runBuildAnalysis, resolveDistDir } from "./build/analyze.js";
 import { resolveOutputDir } from "./paths.js";
 import { buildReport, writeReports, exitCodeForReport } from "./report/index.js";
+import { printFindingsToTerminal } from "./report/terminal.js";
 import { validateProject } from "./validate.js";
 import { runE18eAnalysis } from "./external/e18e.js";
 
@@ -83,6 +84,8 @@ export async function scan(opts: ScanOptions): Promise<number> {
   const report = buildReport(projectRoot, mode, findings);
   const formats = new Set(opts.formats ?? ["json", "md"]);
   writeReports(projectRoot, report, formats);
+
+  printFindingsToTerminal(report);
 
   console.log(
     `wimb: ${report.summary.total} findings (${report.summary.bySeverity.error} errors, ${report.summary.bySeverity.warning} warnings) → ${resolveOutputDir(projectRoot)}`,
