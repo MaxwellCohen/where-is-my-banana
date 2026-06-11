@@ -1,4 +1,6 @@
-import type { ScanReport } from "../types.js";
+import type { Finding, ScanReport, Severity } from "../types.js";
+
+const SEVERITY_SECTIONS: Severity[] = ["error", "warning", "info"];
 
 export function toMarkdown(report: ScanReport): string {
   const lines: string[] = [
@@ -14,28 +16,43 @@ export function toMarkdown(report: ScanReport): string {
     `| Warning | ${report.summary.bySeverity.warning} |`,
     `| Info | ${report.summary.bySeverity.info} |`,
     "",
-    "## Top Findings",
-    "",
   ];
 
-  const top = report.findings.slice(0, 20);
-  for (const f of top) {
-    lines.push(`### [${f.severity}] ${f.ruleId}`);
+  for (const severity of SEVERITY_SECTIONS) {
+    const group = report.findings.filter((f) => f.severity === severity);
+    if (group.length === 0) continue;
+
+    lines.push(`## ${severityLabel(severity)} (${group.length})`);
     lines.push("");
-    lines.push(`**File:** \`${f.file}\`${f.loc ? ` (line ${f.loc.line})` : ""}`);
-    lines.push(`**Confidence:** ${f.confidence}`);
-    if (f.estimatedBytes) lines.push(`**Est. bytes:** ${formatBytes(f.estimatedBytes)}`);
-    lines.push("");
-    lines.push(f.message);
-    lines.push("");
-    lines.push("**Fix:**");
-    for (const step of f.fixStrategy.steps) {
-      lines.push(`- ${step}`);
+
+    for (const f of group) {
+      appendFinding(lines, f);
     }
-    lines.push("");
   }
 
   return lines.join("\n");
+}
+
+function appendFinding(lines: string[], f: Finding): void {
+  lines.push(`### [${f.severity}] ${f.ruleId}`);
+  lines.push("");
+  lines.push(`**File:** \`${f.file}\`${f.loc ? ` (line ${f.loc.line})` : ""}`);
+  lines.push(`**Confidence:** ${f.confidence}`);
+  if (f.estimatedBytes) lines.push(`**Est. bytes:** ${formatBytes(f.estimatedBytes)}`);
+  lines.push("");
+  lines.push(f.message);
+  lines.push("");
+  lines.push("**Fix:**");
+  for (const step of f.fixStrategy.steps) {
+    lines.push(`- ${step}`);
+  }
+  lines.push("");
+}
+
+function severityLabel(severity: Severity): string {
+  if (severity === "error") return "Errors";
+  if (severity === "warning") return "Warnings";
+  return "Info";
 }
 
 function formatBytes(n: number): string {

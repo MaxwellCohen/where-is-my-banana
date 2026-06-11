@@ -11,10 +11,20 @@ import type { Module, ModuleGraph, ExportInfo } from "../types.js";
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const APP_DIRS = ["app", "src/app", "pages", "src/pages", "middleware.ts", "src/middleware.ts"];
 
+function findTsconfig(projectRoot: string): string | null {
+  for (const name of ["tsconfig.json", "jsconfig.json"]) {
+    const path = join(projectRoot, name);
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
 export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
+  const tsconfig = findTsconfig(projectRoot);
   const resolver = new ResolverFactory({
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"],
     conditionNames: ["import", "require", "node", "default"],
+    ...(tsconfig ? { tsconfig: { configFile: tsconfig, references: "auto" } } : {}),
   });
 
   const entries = findEntries(projectRoot);
@@ -122,6 +132,9 @@ function resolveImport(
   projectRoot: string,
   resolver: ResolverFactory,
 ): string | null {
+  const fromFile = resolver.resolveFileSync(from, specifier);
+  if (fromFile.path) return fromFile.path;
+
   if (specifier.startsWith(".") || specifier.startsWith("/")) {
     const result = resolver.sync(dirname(from), specifier);
     if (result.path) return result.path;

@@ -42,6 +42,7 @@ Remediate `wimb` findings using per-rule playbooks. Detection only — no codemo
 ### Loading
 
 - Heavy/conditional components → `next/dynamic(() => import(...), { loading })`
+- Branch-exclusive components (one `if`/ternary branch only) → `branch-exclusive-eager-import` playbook
 - Handler-only libs → `await import('pkg')` inside the handler
 
 ## Playbook index
@@ -51,7 +52,7 @@ Remediate `wimb` findings using per-rule playbooks. Detection only — no codemo
 | boundary | `use-client-unnecessary`, `use-client-too-high`, `use-client-mixed-components`, `interactive-leaf-extractable`, `provider-pulls-in-tree`, `mixed-module-split`, `missing-poison-pill`, `app-barrel-reexport`, `non-serializable-props`, `rsc-payload-bloat`, `metadata-in-client-file` |
 | dependency | `replaceable-dependency`, `heavy-client-import`, `barrel-import`, `obsolete-polyfill`, `duplicate-dependency-category`, `duplicate-dependency-versions`, `runtime-css-in-js`, `dev-code-in-prod`, `transitive-heavy-dependency`, `unused-dependency`, `static-icon-map`, `node-builtin-polyfill-config` |
 | misplacement | `server-logic-in-client`, `auth-crypto-in-client`, `env-var-misuse`, `third-party-script-as-import`, `static-content-rendered-client`, `use-server-file-mixed-exports`, `middleware-heavy-imports` |
-| loading | `missing-dynamic-import`, `on-demand-feature-eager`, `locale-data-bloat`, `syntax-highlighter-all-languages`, `client-search-index`, `large-static-data-in-client`, `inline-svg-collection`, `asset-in-bundle`, `wasm-eager-load`, `next-dynamic-misuse` |
+| loading | `missing-dynamic-import`, `branch-exclusive-eager-import`, `on-demand-feature-eager`, `locale-data-bloat`, `syntax-highlighter-all-languages`, `client-search-index`, `large-static-data-in-client`, `inline-svg-collection`, `asset-in-bundle`, `wasm-eager-load`, `next-dynamic-misuse` |
 | config | `missing-optimize-package-imports`, `legacy-browser-targets`, `route-over-budget` |
 
 ## Verification

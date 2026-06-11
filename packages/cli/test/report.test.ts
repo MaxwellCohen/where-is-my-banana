@@ -3,8 +3,21 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildReport, writeReports } from "../src/report/index.js";
+import { toMarkdown } from "../src/report/markdown.js";
 import { formatFindingsForTerminal } from "../src/report/terminal.js";
 import type { Finding } from "../src/types.js";
+
+function baseFinding(partial: Partial<Finding> & Pick<Finding, "id" | "ruleId" | "severity">): Finding {
+  return {
+    category: "loading",
+    confidence: "high",
+    file: "app/page.tsx",
+    message: "test",
+    evidence: {},
+    fixStrategy: { name: "x", steps: ["fix it"] },
+    ...partial,
+  };
+}
 
 describe("buildReport", () => {
   it("dedupes estimatedClientBytes by package", () => {
@@ -65,6 +78,35 @@ describe("formatFindingsForTerminal", () => {
     expect(output).toContain("error   heavy-client-import  app/page.tsx:4 (2.0 KB)");
     expect(output).toContain("Heavy package 'lodash' imported in client graph");
     expect(output).toContain("→ Use a lighter alternative if available");
+  });
+});
+
+describe("toMarkdown", () => {
+  it("includes all findings grouped by severity, not only the largest", () => {
+    const findings: Finding[] = [
+      ...Array.from({ length: 25 }, (_, i) =>
+        baseFinding({
+          id: `error-${i}`,
+          ruleId: "heavy-client-import",
+          severity: "error",
+          estimatedBytes: 1_000_000 - i,
+          evidence: { package: `pkg-${i}` },
+        }),
+      ),
+      baseFinding({
+        id: "warning-1",
+        ruleId: "branch-exclusive-eager-import",
+        severity: "warning",
+        estimatedBytes: 100_000,
+        message: "branch-exclusive finding",
+      }),
+    ];
+
+    const md = toMarkdown(buildReport("/tmp", "source", findings));
+    expect(md).toContain("## Errors (25)");
+    expect(md).toContain("## Warnings (1)");
+    expect(md).toContain("branch-exclusive-eager-import");
+    expect(md).toContain("branch-exclusive finding");
   });
 });
 
