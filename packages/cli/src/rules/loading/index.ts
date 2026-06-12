@@ -10,10 +10,12 @@ import { assetInBundle } from "./asset-in-bundle.js";
 import { wasmEagerLoad } from "./wasm-eager-load.js";
 import { nextDynamicMisuse } from "./next-dynamic-misuse.js";
 import { branchExclusiveEagerImport } from "./branch-exclusive-eager-import.js";
+import { staticComponentMap } from "./static-component-map.js";
 
 export const loadingRules: Rule[] = [
   missingDynamicImport,
   branchExclusiveEagerImport,
+  staticComponentMap,
   onDemandFeatureEager,
   localeDataBloat,
   syntaxHighlighterAllLanguages,

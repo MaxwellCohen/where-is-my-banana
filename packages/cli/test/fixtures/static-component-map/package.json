@@ -1,0 +1,8 @@
+{
+  "name": "static-component-map-fixture",
+  "private": true,
+  "devDependencies": {
+    "next": "^15.0.0"
+  },
+  "dependencies": {}
+}

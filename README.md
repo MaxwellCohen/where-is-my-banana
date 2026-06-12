@@ -1,5 +1,10 @@
 # Where Is My Banana (WIMB)
 
+>“… Because the problem with object-oriented languages is they’ve got all this implicit environment that they carry around with them. You wanted a banana but what you got was a gorilla holding the banana and the entire jungle. “ —Joe Armstrong, creator of Erlang progamming language
+
+Modern TS web projects it is to so easy to accidentally pull into the client way to much JavaScript.
+Where Is my Banana? hopes to help to make sure your project just has your banana(code) and not a bunch of extra stuff you do not need (a gorilla, and jungle). This project starts out focused on Next.js App Router + Turbopack apps because tooling is lacking. I hope to find better tooling so this vibe coded project is not the best to for having you and your agent clean up your projects.    
+
 A TypeScript CLI that detects unnecessary client-side code in Next.js App Router + Turbopack apps. Because when I want a banana I only want a banana not everything else. 
 
 ## Quick start

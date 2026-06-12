@@ -16,6 +16,8 @@ export const DEFAULT_CONFIG: WimbConfig = {
     barrelReexportRatio: 0.8,
     barrelMinReexports: 5,
     iconMapMinEntries: 10,
+    componentMapMinEntries: 10,
+    componentMapMinImports: 5,
     inlineSvgMinCount: 10,
     inlineSvgMinBytes: 30_720,
     dynamicImportMinSubtree: 20_480,

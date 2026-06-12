@@ -107,6 +107,8 @@ export interface WimbConfig {
     barrelReexportRatio: number;
     barrelMinReexports: number;
     iconMapMinEntries: number;
+    componentMapMinEntries: number;
+    componentMapMinImports: number;
     inlineSvgMinCount: number;
     inlineSvgMinBytes: number;
     dynamicImportMinSubtree: number;
