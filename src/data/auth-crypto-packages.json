@@ -1,0 +1,9 @@
+[
+  "jsonwebtoken",
+  "bcrypt",
+  "bcryptjs",
+  "argon2",
+  "jose",
+  "crypto-js",
+  "@node-rs/argon2"
+]

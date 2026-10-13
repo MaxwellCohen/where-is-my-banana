@@ -1,0 +1,37 @@
+{
+  "name": "@wimb/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "wimb": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src/data"
+  ],
+  "dependencies": {
+    "citty": "^0.1.6",
+    "jiti": "^2.7.0",
+    "knip": "^6.16.1",
+    "module-replacements": "^2.4.0",
+    "oxc-parser": "^0.75.0",
+    "oxc-resolver": "^11.0.0"
+  },
+  "optionalDependencies": {
+    "@e18e/cli": "^0.7.0",
+    "@rsc-xray/analyzer": "^0.8.0"
+  },
+  "peerDependencies": {
+    "@e18e/cli": ">=0.7.0",
+    "@rsc-xray/analyzer": ">=0.8.0"
+  },
+  "peerDependenciesMeta": {
+    "@e18e/cli": {
+      "optional": true
+    },
+    "@rsc-xray/analyzer": {
+      "optional": true
+    }
+  }
+}

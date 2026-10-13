@@ -1,0 +1,10 @@
+[
+  "react-ga4",
+  "@segment/analytics-next",
+  "hotjar",
+  "@intercom/messenger-js-sdk",
+  "mixpanel-browser",
+  "posthog-js",
+  "react-ga",
+  "react-gtm-module"
+]
