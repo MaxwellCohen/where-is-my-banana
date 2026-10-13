@@ -1,0 +1,2 @@
+# Keep the hosted app empty of sample forests (local-only UX).
+public/demo-graph.json

@@ -6,12 +6,17 @@ type SpanNode = {
   end?: number;
 };
 
-function nodeOffset(node: SpanNode, end = false): number {
-  if (end) return node.span?.end ?? node.end ?? 0;
-  return node.span?.start ?? node.start ?? 0;
+function asSpan(node: unknown): SpanNode {
+  return (node ?? {}) as SpanNode;
 }
 
-export function locFromSpan(node: SpanNode, lines: string[], end = false): Loc {
+function nodeOffset(node: unknown, end = false): number {
+  const n = asSpan(node);
+  if (end) return n.span?.end ?? n.end ?? 0;
+  return n.span?.start ?? n.start ?? 0;
+}
+
+export function locFromSpan(node: unknown, lines: string[], end = false): Loc {
   const offset = nodeOffset(node, end);
   let line = 1;
   let col = 1;

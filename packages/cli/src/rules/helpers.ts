@@ -148,6 +148,11 @@ export function estimatedBytes(ctx: RuleContext, packageName: string): number {
   return getInstallSize(ctx, packageName);
 }
 
+/** True when package size came from next analyze attribution. */
+export function isMeasuredPackageBytes(ctx: RuleContext, packageName: string): boolean {
+  return Boolean(ctx.byteAttribution?.measured && ctx.byteAttribution.modules.has(packageName));
+}
+
 export function fixSteps(...steps: string[]) {
   return { name: "remediation", steps };
 }

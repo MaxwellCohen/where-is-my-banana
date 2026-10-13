@@ -6,7 +6,7 @@ export function toMarkdown(report: ScanReport): string {
   const lines: string[] = [
     "# WIMB Report — Where Is My Banana",
     "",
-    `**Mode:** ${report.mode} | **Findings:** ${report.summary.total} | **Est. client bytes:** ${formatBytes(report.summary.estimatedClientBytes)}`,
+    `**Mode:** ${report.mode} | **Findings:** ${report.summary.total} | **${report.summary.byteSource === "measured" ? "Measured" : "Est."} client bytes:** ${formatBytes(report.summary.estimatedClientBytes)}`,
     "",
     "## Summary",
     "",
@@ -38,7 +38,10 @@ function appendFinding(lines: string[], f: Finding): void {
   lines.push("");
   lines.push(`**File:** \`${f.file}\`${f.loc ? ` (line ${f.loc.line})` : ""}`);
   lines.push(`**Confidence:** ${f.confidence}`);
-  if (f.estimatedBytes) lines.push(`**Est. bytes:** ${formatBytes(f.estimatedBytes)}`);
+  if (f.estimatedBytes) {
+    const label = f.byteSource === "measured" ? "Measured bytes" : "Est. bytes";
+    lines.push(`**${label}:** ${formatBytes(f.estimatedBytes)}`);
+  }
   lines.push("");
   lines.push(f.message);
   lines.push("");

@@ -9,7 +9,12 @@ describe("e2e scan", () => {
     const projectRoot = fixturePath("e2e-app");
     const code = await scan({ projectRoot, formats: ["json"] });
     expect(existsSync(join(projectRoot, ".wimb", "wimb-report.json"))).toBe(true);
+    expect(existsSync(join(projectRoot, ".wimb", "forest.json"))).toBe(true);
     const report = JSON.parse(readFileSync(join(projectRoot, ".wimb", "wimb-report.json"), "utf-8"));
+    const forest = JSON.parse(readFileSync(join(projectRoot, ".wimb", "forest.json"), "utf-8"));
+    expect(forest.pages).toHaveLength(1);
+    expect(forest.pages[0]?.route).toBe("/");
+    expect(forest.entries["app/page.tsx"]).toBeDefined();
     const ruleIds = report.findings.map((f: { ruleId: string }) => f.ruleId);
     expect(ruleIds).toContain("server-logic-in-client");
     expect(ruleIds).toContain("barrel-import");

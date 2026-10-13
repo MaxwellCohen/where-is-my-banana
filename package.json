@@ -4,11 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @wimb/cli build",
-    "test": "pnpm --filter @wimb/cli test",
-    "dev": "pnpm --filter @wimb/cli dev"
+    "build": "pnpm --filter @wimb/graph-v1 build && pnpm --filter @wimb/cli build",
+    "pack:npx": "node scripts/pack-npx.mjs",
+    "pack:npx:push": "node scripts/pack-npx.mjs --push",
+    "test": "pnpm --filter @wimb/graph-v1 test && pnpm --filter @wimb/cli test",
+    "dev": "pnpm --filter @wimb/cli dev",
+    "viz": "pnpm --filter @wimb/visualizer dev",
+    "viz:demo": "node scripts/refresh-viz-demo.mjs",
+    "viz:watch": "pnpm --filter @wimb/graph-v1 --filter @wimb/visualizer --parallel dev",
+    "viz:deploy": "vercel deploy --prod --yes --scope maxs-projects-e09fe1c2 --project wimb-visualizer"
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "packageManager": "pnpm@9.15.0"
 }

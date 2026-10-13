@@ -1,4 +1,7 @@
-import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import type { Finding, Severity } from "../types.js";
 
 interface E18eMessage {
@@ -23,13 +26,13 @@ const SEVERITY_MAP: Record<string, Severity> = {
   info: "info",
 };
 
-export function runE18eAnalysis(projectRoot: string): Finding[] {
+/**
+ * Run @e18e/cli analyze. Resolves the binary from the target app or wimb's
+ * optional dependency before falling back to `npx`.
+ */
+export async function runE18eAnalysis(projectRoot: string): Promise<Finding[]> {
   try {
-    const stdout = execSync("npx @e18e/cli analyze --json", {
-      cwd: projectRoot,
-      stdio: ["pipe", "pipe", "pipe"],
-      encoding: "utf-8",
-    });
+    const stdout = runE18eCli(projectRoot);
     const parsed = JSON.parse(stdout) as E18eJsonOutput;
     return (parsed.messages ?? []).map((msg, index) => toFinding(msg, index));
   } catch (err) {
@@ -37,6 +40,61 @@ export function runE18eAnalysis(projectRoot: string): Finding[] {
     console.error(`wimb: e18e analysis skipped (${message})`);
     return [];
   }
+}
+
+function runE18eCli(projectRoot: string): string {
+  const bin = resolveE18eBin(projectRoot);
+  if (bin) {
+    return execFileSync(bin, ["analyze", "--json"], {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  }
+
+  // Last resort: npx (may download)
+  return execFileSync("npx", ["--yes", "@e18e/cli", "analyze", "--json"], {
+    cwd: projectRoot,
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+export function resolveE18eBin(projectRoot: string): string | null {
+  const candidates = [
+    join(projectRoot, "node_modules", ".bin", "e18e"),
+    join(projectRoot, "node_modules", "@e18e", "cli", "bin", "e18e.js"),
+  ];
+
+  for (const path of candidates) {
+    if (existsSync(path)) return path;
+  }
+
+  // Resolve from wimb's own node_modules (optionalDependency / peer)
+  try {
+    const require = createRequire(import.meta.url);
+    const pkgJson = require.resolve("@e18e/cli/package.json");
+    const dir = join(pkgJson, "..");
+    for (const rel of ["bin/e18e.js", "dist/cli.js", "bin/cli.js"]) {
+      const candidate = join(dir, rel);
+      if (existsSync(candidate)) return candidate;
+    }
+    // package.json bin field
+    const pkg = require("@e18e/cli/package.json") as { bin?: string | Record<string, string> };
+    if (typeof pkg.bin === "string") {
+      const candidate = join(dir, pkg.bin);
+      if (existsSync(candidate)) return candidate;
+    } else if (pkg.bin && typeof pkg.bin === "object") {
+      for (const rel of Object.values(pkg.bin)) {
+        const candidate = join(dir, rel);
+        if (existsSync(candidate)) return candidate;
+      }
+    }
+  } catch {
+    // not installed alongside wimb
+  }
+
+  return null;
 }
 
 function toFinding(msg: E18eMessage, index: number): Finding {

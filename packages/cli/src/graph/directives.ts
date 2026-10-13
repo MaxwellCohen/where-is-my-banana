@@ -1,7 +1,6 @@
 import type { Program } from "oxc-parser";
 import type { Directive } from "../types.js";
-
-type AstNode = { type: string; [key: string]: unknown };
+import { stringLiteralValue, toAst } from "./ast-walk.js";
 
 const PROLOGUE_DIRECTIVES = new Set(["use client", "use server"]);
 
@@ -16,30 +15,17 @@ export function extractDirectives(program: Program): Set<Directive> {
       continue;
     }
     if (stmt.type === "ExpressionStatement") {
-      const value = getStringLiteralValue(stmt.expression as AstNode);
+      const value = stringLiteralValue(toAst(stmt.expression));
       if (value && PROLOGUE_DIRECTIVES.has(value)) {
         directives.add(value as Directive);
       }
       continue;
     }
-    if (
-      stmt.type !== "EmptyStatement" &&
-      stmt.type !== "LineComment" &&
-      stmt.type !== "BlockComment"
-    ) {
+    // Stop at first non-prologue statement (comments are not part of body)
+    if (stmt.type !== "EmptyStatement") {
       break;
     }
   }
 
   return directives;
-}
-
-function getStringLiteralValue(node: AstNode): string | null {
-  if (node.type === "Literal" && typeof node.value === "string") {
-    return node.value;
-  }
-  if (node.type === "StringLiteral" && typeof node.value === "string") {
-    return node.value;
-  }
-  return null;
 }

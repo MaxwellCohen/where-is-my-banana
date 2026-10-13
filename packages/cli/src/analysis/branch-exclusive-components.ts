@@ -1,8 +1,7 @@
 import type { Program } from "oxc-parser";
 import type { Import, Loc } from "../types.js";
 import { locFromSpan } from "../graph/loc.js";
-
-type AstNode = { type: string; [key: string]: unknown };
+import { type AstNode, toAst, walk } from "../graph/ast-walk.js";
 
 const PATH_ROOT_NAMES = new Set(["pathname", "path", "asPath", "href", "route"]);
 
@@ -23,7 +22,7 @@ export function analyzeBranchExclusiveComponents(
   const pathRoots = collectPathRoots(program);
   const candidates: BranchExclusiveCandidate[] = [];
 
-  walk(program, (node) => {
+  walk(toAst(program), (node) => {
     if (node.type === "IfStatement") {
       collectFromConditional(
         node.test as AstNode,
@@ -188,7 +187,7 @@ function findComponentLoc(node: AstNode, componentName: string, lines: string[])
 function collectPathRoots(program: Program): Set<string> {
   const roots = new Set<string>(PATH_ROOT_NAMES);
 
-  walk(program, (node) => {
+  walk(toAst(program), (node) => {
     if (node.type === "VariableDeclarator") {
       const id = node.id as AstNode;
       const init = node.init as AstNode | null;
@@ -228,7 +227,7 @@ function collectPathRoots(program: Program): Set<string> {
   });
 
   // Second pass: track assignments from known path roots
-  walk(program, (node) => {
+  walk(toAst(program), (node) => {
     if (node.type !== "VariableDeclarator") return;
     const id = node.id as AstNode;
     const init = node.init as AstNode | null;
@@ -304,7 +303,7 @@ function stringLiteralRoute(node: AstNode): string | null {
 
 function findDeclaratorInit(program: Program, name: string): AstNode | null {
   let init: AstNode | null = null;
-  walk(program as unknown as AstNode, (node) => {
+  walk(toAst(program), (node) => {
     if (init) return;
     if (node.type !== "VariableDeclarator") return;
     const id = node.id as AstNode;
@@ -336,23 +335,6 @@ function dedupeCandidates(candidates: BranchExclusiveCandidate[]): BranchExclusi
     result.push(c);
   }
   return result;
-}
-
-function walk(node: AstNode, visitor: (n: AstNode) => void): void {
-  visitor(node);
-  for (const key of Object.keys(node)) {
-    const val = node[key];
-    if (!val || typeof val !== "object") continue;
-    if (Array.isArray(val)) {
-      for (const child of val) {
-        if (child && typeof child === "object" && "type" in child) {
-          walk(child as AstNode, visitor);
-        }
-      }
-    } else if ("type" in val) {
-      walk(val as AstNode, visitor);
-    }
-  }
 }
 
 function walkWithAncestors(

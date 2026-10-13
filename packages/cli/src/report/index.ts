@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveOutputDir } from "../paths.js";
-import type { ScanReport, Finding, Severity } from "../types.js";
+import type { ByteSource, ScanReport, Finding, Severity } from "../types.js";
 import { toMarkdown } from "./markdown.js";
 import { toSarif } from "./sarif.js";
 
@@ -11,14 +11,17 @@ export function buildReport(
   projectRoot: string,
   mode: "source" | "build",
   findings: Finding[],
+  opts?: { byteSource?: ByteSource },
 ): ScanReport {
   const bySeverity: Record<Severity, number> = { error: 0, warning: 0, info: 0 };
   const byCategory: Record<string, number> = {};
   const byteKeys = new Map<string, number>();
+  let anyMeasured = false;
 
   for (const f of findings) {
     bySeverity[f.severity]++;
     byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
+    if (f.byteSource === "measured") anyMeasured = true;
     if (f.estimatedBytes == null) continue;
     const key = byteDedupeKey(f);
     const prev = byteKeys.get(key) ?? 0;
@@ -27,6 +30,7 @@ export function buildReport(
 
   // Approximate upper bound — deduped by package/module per finding
   const estimatedClientBytes = [...byteKeys.values()].reduce((sum, n) => sum + n, 0);
+  const byteSource = opts?.byteSource ?? (anyMeasured ? "measured" : "estimated");
 
   return {
     version: "1.0.0",
@@ -38,7 +42,13 @@ export function buildReport(
         (b.estimatedBytes ?? 0) - (a.estimatedBytes ?? 0) ||
         SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity],
     ),
-    summary: { total: findings.length, bySeverity, byCategory, estimatedClientBytes },
+    summary: {
+      total: findings.length,
+      bySeverity,
+      byCategory,
+      estimatedClientBytes,
+      byteSource,
+    },
   };
 }
 

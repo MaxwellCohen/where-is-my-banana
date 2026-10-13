@@ -1,8 +1,7 @@
 import type { Program } from "oxc-parser";
 import type { Import, Loc } from "../types.js";
 import { locFromSpan } from "../graph/loc.js";
-
-type AstNode = { type: string; [key: string]: unknown };
+import { type AstNode, toAst, walk } from "../graph/ast-walk.js";
 
 export interface ComponentRegistry {
   exportName: string;
@@ -153,14 +152,22 @@ function collectLocalObjectDeclarations(
     if (stmt.type === "VariableDeclaration") {
       for (const decl of stmt.declarations) {
         if (decl.id.type === "Identifier") {
-          record(decl.id.name, (decl.init as AstNode) ?? null, locFromSpan(decl, lines));
+          record(
+            decl.id.name,
+            decl.init ? toAst(decl.init) : null,
+            locFromSpan(decl, lines),
+          );
         }
       }
     }
     if (stmt.type === "ExportNamedDeclaration" && stmt.declaration?.type === "VariableDeclaration") {
       for (const decl of stmt.declaration.declarations) {
         if (decl.id.type === "Identifier") {
-          record(decl.id.name, (decl.init as AstNode) ?? null, locFromSpan(decl, lines));
+          record(
+            decl.id.name,
+            decl.init ? toAst(decl.init) : null,
+            locFromSpan(decl, lines),
+          );
         }
       }
     }
@@ -193,11 +200,8 @@ function collectExportedNames(program: Program): Set<string> {
     if (stmt.type === "ExportDefaultDeclaration") {
       const decl = stmt.declaration;
       if (decl?.type === "Identifier") names.add(decl.name);
-      if (decl?.type === "VariableDeclaration") {
-        for (const d of decl.declarations) {
-          if (d.id.type === "Identifier") names.add(d.id.name);
-        }
-      }
+      // Default export of a VariableDeclaration isn't valid ES syntax; ignore.
+      void decl;
     }
   }
 
@@ -235,19 +239,3 @@ function buildImportedSymbolMap(program: Program, imports: Import[]): Map<string
   return map;
 }
 
-function walk(node: AstNode, visitor: (n: AstNode) => void): void {
-  visitor(node);
-  for (const key of Object.keys(node)) {
-    const val = node[key];
-    if (!val || typeof val !== "object") continue;
-    if (Array.isArray(val)) {
-      for (const child of val) {
-        if (child && typeof child === "object" && "type" in child) {
-          walk(child as AstNode, visitor);
-        }
-      }
-    } else if ("type" in val) {
-      walk(val as AstNode, visitor);
-    }
-  }
-}

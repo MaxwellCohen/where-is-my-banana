@@ -23,8 +23,13 @@ Detect unnecessary client-side code in Next.js App Router + Turbopack apps using
 # Source scan (default — no build required)
 pnpm exec wimb scan --cwd <project-root>
 
-# Deep scan with real byte attribution (requires Next 16.1+)
+# Deep scan with real byte attribution
+# Next 16.4+: `next analyze --output` then `next analyze export`
+# Next 16.1–16.3: binary experimental-analyze artifacts
 pnpm exec wimb scan --cwd <project-root> --build
+
+# Or feed an export you already captured
+pnpm exec wimb scan --cwd <project-root> --analyze-export ./bundle-graph.jsonl
 
 # Point at pre-built analyze output from CI
 pnpm exec wimb scan --cwd <project-root> --build --dist-dir .next
@@ -33,7 +38,7 @@ pnpm exec wimb scan --cwd <project-root> --build --dist-dir .next
 pnpm exec wimb scan --cwd <project-root> --format json,md,sarif
 ```
 
-Install if needed: `pnpm add -D @wimb/cli` or use the monorepo `dist/index.js` directly.
+No monorepo clone: use `skills/run-wimb-npx/` (`npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb …`). In this repo: `pnpm exec wimb` after `pnpm build`.
 
 ## Read the report
 
@@ -69,7 +74,9 @@ Act on `high` confidence directly. Verify `medium` before large refactors. Treat
 
 ## Cross-checks (optional)
 
-- `next experimental-analyze --output` — real per-route bytes (wimb `--build` wraps this)
+- `next analyze export` — graph-v1 JSONL (wimb `--build` on Next 16.4+ wraps capture + export; `--analyze-export` reads a file)
+- Route-rooted tree UI — `skills/visualize-analyze-export` (`wimb viz build` + `@wimb/visualizer`)
+- `next experimental-analyze --output` — binary artifacts on Next before 16.4
 - `@next/bundle-analyzer` — visual treemap
 - `@rsc-xray/analyzer` — RSC flight payload inspection
 

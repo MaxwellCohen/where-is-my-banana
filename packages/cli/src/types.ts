@@ -119,6 +119,10 @@ export interface WimbConfig {
     searchIndexMinBytes: number;
     base64MinBytes: number;
     rscPayloadMaxFields: number;
+    /** Max allowed client-byte increase vs baseline for `wimb diff` / `--baseline` (0 = disabled). */
+    diffBudgetBytes: number;
+    /** Fail diff when new error-severity findings appear (default true via config merge). */
+    diffFailOnNewFindings: boolean;
   };
   ignores: {
     files: string[];
@@ -132,6 +136,8 @@ export interface FixStrategy {
   steps: string[];
 }
 
+export type ByteSource = "estimated" | "measured";
+
 export interface Finding {
   id: string;
   ruleId: string;
@@ -143,13 +149,21 @@ export interface Finding {
   message: string;
   evidence: Record<string, unknown>;
   estimatedBytes?: number;
+  /** Whether estimatedBytes came from real bundle attribution or a heuristic. */
+  byteSource?: ByteSource;
   fixStrategy: FixStrategy;
-  source?: "wimb" | "e18e" | "knip";
+  source?: "wimb" | "e18e" | "knip" | "rsc-xray";
 }
+
+export type AnalyzeFormat = "export" | "binary" | "legacy-json" | "webpack-stats";
 
 export interface ByteAttribution {
   routes: Map<string, number>;
   modules: Map<string, number>;
+  /** True when sizes came from next analyze / webpack stats. */
+  measured?: boolean;
+  /** Which analyzer output produced these sizes. */
+  format?: AnalyzeFormat;
 }
 
 export interface Rule {
@@ -181,5 +195,7 @@ export interface ScanReport {
     bySeverity: Record<Severity, number>;
     byCategory: Record<string, number>;
     estimatedClientBytes: number;
+    /** Whether summary bytes are measured (from analyze) or estimated. */
+    byteSource?: ByteSource;
   };
 }

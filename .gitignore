@@ -1,6 +1,10 @@
 node_modules/
 dist/
 .next/
+.vercel/
+packages/visualizer/public/demo-graph.json
 *.tsbuildinfo
 .wimb/
+.npm-pack/
+wimb-cli-*.tgz
 .DS_Store

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { runKnipUnusedDependencyAnalysis } from "../src/external/knip.js";
+import { runKnipUnusedDependencyAnalysis, runKnipAnalysis } from "../src/external/knip.js";
+import type { ModuleGraph } from "../src/types.js";
 
 const { mockMain, mockCreateOptions } = vi.hoisted(() => ({
   mockMain: vi.fn(),
@@ -19,6 +20,16 @@ const defaultConfig = {
   ignores: { files: [], rules: [] },
   severityOverrides: {},
 };
+
+function clientGraph(filePath: string): ModuleGraph {
+  return {
+    modules: new Map(),
+    entries: [filePath],
+    clientModules: new Set([filePath]),
+    serverModules: new Set(),
+    sharedModules: new Set(),
+  };
+}
 
 describe("runKnipUnusedDependencyAnalysis", () => {
   beforeEach(() => {
@@ -108,5 +119,49 @@ describe("runKnipUnusedDependencyAnalysis", () => {
     mockCreateOptions.mockRejectedValue(new Error("no package.json"));
     const findings = await runKnipUnusedDependencyAnalysis("/tmp/project", defaultConfig);
     expect(findings).toEqual([]);
+  });
+});
+
+describe("runKnipAnalysis client dead code", () => {
+  beforeEach(() => {
+    mockMain.mockReset();
+    mockCreateOptions.mockReset();
+    mockCreateOptions.mockResolvedValue({ cwd: "/tmp/project" });
+  });
+
+  it("reports unused exports only for client-reachable modules", async () => {
+    mockMain.mockResolvedValue({
+      issues: {
+        dependencies: {},
+        devDependencies: {},
+        files: {},
+        exports: {
+          ".": {
+            "components/Dead.tsx": {
+              unusedHelper: {
+                type: "exports",
+                filePath: "components/Dead.tsx",
+                workspace: ".",
+                symbol: "unusedHelper",
+                fixes: [],
+                line: 3,
+                col: 1,
+              },
+            },
+          },
+        },
+        types: {},
+      },
+    });
+
+    const findings = await runKnipAnalysis(
+      "/tmp/project",
+      defaultConfig,
+      clientGraph("/tmp/project/components/Dead.tsx"),
+    );
+    expect(findings.some((f) => f.ruleId === "unused-client-export")).toBe(true);
+    expect(findings.find((f) => f.ruleId === "unused-client-export")?.evidence.export).toBe(
+      "unusedHelper",
+    );
   });
 });

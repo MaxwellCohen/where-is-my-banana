@@ -1,11 +1,15 @@
 import type { Program } from "oxc-parser";
 import type { ResolverFactory } from "oxc-resolver";
-import { dirname } from "node:path";
 import type { Import } from "../types.js";
 import { getPackageName } from "./package-info.js";
 import { locFromSpan } from "./loc.js";
-
-type AstNode = { type: string; [key: string]: unknown };
+import {
+  type AstNode,
+  exportedName,
+  stringLiteralValue,
+  toAst,
+  walk,
+} from "./ast-walk.js";
 
 export function extractImports(
   filePath: string,
@@ -63,7 +67,7 @@ export function extractImports(
         specifier,
         resolvedPath: resolved,
         packageName: getPackageName(specifier),
-        namedSymbols: stmt.specifiers?.map((s) => s.exported?.name ?? "") ?? [],
+        namedSymbols: stmt.specifiers?.map((s) => exportedName(toAst(s.exported))) ?? [],
         isDynamic: false,
         isTypeOnly: false,
         loc: locFromSpan(stmt, lines),
@@ -71,10 +75,9 @@ export function extractImports(
     }
   }
 
-  walk(program, (node) => {
+  walk(toAst(program), (node) => {
     if (node.type !== "ImportExpression") return;
-    const sourceNode = node.source as AstNode | undefined;
-    const specifier = getImportSourceValue(sourceNode);
+    const specifier = stringLiteralValue(node.source as AstNode | undefined);
     if (!specifier) return;
     const resolved = resolveImport(filePath, specifier, projectRoot, resolver);
     imports.push({
@@ -99,14 +102,14 @@ export function extractImports(
 
 function collectDynamicSpecifiers(program: Program): Set<string> {
   const specifiers = new Set<string>();
-  walk(program, (node) => {
+  walk(toAst(program), (node) => {
     if (node.type !== "CallExpression") return;
     const callee = node.callee as AstNode;
     if (!isNextDynamicCallee(callee)) return;
     for (const arg of (node.arguments as AstNode[]) ?? []) {
       const inner = findImportExpression(arg);
       if (!inner) continue;
-      const value = getImportSourceValue(inner.source as AstNode);
+      const value = stringLiteralValue(inner.source as AstNode);
       if (value) specifiers.add(value);
     }
   });
@@ -139,28 +142,4 @@ function findImportExpression(node: AstNode): AstNode | null {
     }
   }
   return null;
-}
-
-function getImportSourceValue(source: AstNode | undefined): string | null {
-  if (!source) return null;
-  if (source.type === "Literal" && typeof source.value === "string") return source.value;
-  if (source.type === "StringLiteral" && typeof source.value === "string") return source.value;
-  return null;
-}
-
-function walk(node: AstNode, visitor: (n: AstNode) => void) {
-  visitor(node);
-  for (const key of Object.keys(node)) {
-    const val = node[key];
-    if (!val || typeof val !== "object") continue;
-    if (Array.isArray(val)) {
-      for (const child of val) {
-        if (child && typeof child === "object" && "type" in child) {
-          walk(child as AstNode, visitor);
-        }
-      }
-    } else if ("type" in val) {
-      walk(val as AstNode, visitor);
-    }
-  }
 }

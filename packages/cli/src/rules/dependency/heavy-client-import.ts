@@ -1,5 +1,12 @@
 import type { Rule } from "../../types.js";
-import { reportFinding, projectClientModulePaths, isIgnored, estimatedBytes, isFrameworkPackage } from "../helpers.js";
+import {
+  reportFinding,
+  projectClientModulePaths,
+  isIgnored,
+  estimatedBytes,
+  isFrameworkPackage,
+  isMeasuredPackageBytes,
+} from "../helpers.js";
 
 export const heavyClientImport: Rule = {
   id: "heavy-client-import",
@@ -14,8 +21,11 @@ export const heavyClientImport: Rule = {
         if (!imp.packageName || seen.has(`${path}:${imp.packageName}`)) continue;
         if (isFrameworkPackage(ctx, imp.packageName)) continue;
         const size = estimatedBytes(ctx, imp.packageName);
-        const isHeavy =
-          size > heavyPackageBytes || ctx.data.heavyPackages.has(imp.packageName);
+        const measured = isMeasuredPackageBytes(ctx, imp.packageName);
+        // Prefer measured size over static heavy-packages allowlist as the size oracle
+        const isHeavy = measured
+          ? size > heavyPackageBytes
+          : size > heavyPackageBytes || ctx.data.heavyPackages.has(imp.packageName);
         if (!isHeavy) continue;
         seen.add(`${path}:${imp.packageName}`);
         if (isIgnored(ctx, "heavy-client-import", path)) continue;
@@ -24,12 +34,17 @@ export const heavyClientImport: Rule = {
             ruleId: "heavy-client-import",
             category: "dependency",
             defaultSeverity: "error",
-            confidence: "high",
+            confidence: measured ? "high" : size > 0 ? "high" : "medium",
             file: path,
             loc: imp.loc,
             message: `Heavy package '${imp.packageName}' imported in client graph`,
-            evidence: { package: imp.packageName, importChain: mod.importChainFromEntry },
+            evidence: {
+              package: imp.packageName,
+              importChain: mod.importChainFromEntry,
+              byteSource: measured ? "measured" : "estimated",
+            },
             estimatedBytes: size,
+            byteSource: measured ? "measured" : "estimated",
             fixStrategy: {
               name: "reduce-heavy-import",
               steps: [
