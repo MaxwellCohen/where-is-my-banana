@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { scan } from "./scan.js";
 import { writeVizGraph } from "./viz.js";
 import { readFileSync } from "node:fs";
-import { runWins } from "./wins/index.js";
+import { runWins, runNextAnalyze } from "./wins/index.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
 import type { WinsReport } from "./wins/types.js";
@@ -141,6 +141,7 @@ const winsCommand = defineCommand({
     "analyze-export": { type: "string", description: "next analyze export JSONL (.jsonl or .jsonl.gz)" },
     "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
     snapshot: { type: "string", description: "Named next analyze snapshot" },
+    analyze: { type: "boolean", description: "Run `next analyze --output` first (use --no-analyze to reuse existing data)", default: true },
     "min-bytes": { type: "string", description: "Drop edges saving fewer bytes than this" },
     top: { type: "string", description: "Number of wins to print", default: "10" },
     json: { type: "boolean", description: "Print WinsReport JSON to stdout", default: false },
@@ -152,11 +153,13 @@ const winsCommand = defineCommand({
     const projectRoot = resolve(args.cwd);
     let report: WinsReport;
     try {
+      const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
+      if (args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
       report = await runWins({
         projectRoot,
         analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
         distDir: args["dist-dir"],
-        snapshot: args.snapshot,
+        snapshot,
         minBytes: args["min-bytes"] ? Number(args["min-bytes"]) : undefined,
       });
     } catch (err) {

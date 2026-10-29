@@ -10,13 +10,10 @@ Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack). No 
 
 ```bash
 cd your-next-app
-
-# 1. capture the Turbopack module graph (writes .next/diagnostics/analyze)
-npx next analyze --output --snapshot wins
-
-# 2. rank the wins (reads that snapshot via `next analyze export`)
 npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd .
 ```
+
+This runs `next analyze --output --snapshot wins` for you, then ranks the wins. Pass `--no-analyze` to reuse existing analyze data.
 
 Outputs `.wimb/wins.json` (machine) and `.wimb/wins.md` (human). Add `.wimb/` to `.gitignore`.
 
@@ -28,7 +25,7 @@ Track progress between runs:
 
 ```bash
 cp .wimb/wins.json .wimb/wins.prev.json     # before you change code
-# ...apply a fix, rerun steps 1-2...
+# ...apply a fix, rerun the command...
 npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --compare .wimb/wins.prev.json
 ```
 
