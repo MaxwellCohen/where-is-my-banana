@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseGraphV1Jsonl } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
+import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
 import { attributeRoutes } from "./attribute.js";
@@ -62,7 +63,7 @@ async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
     }
     return parseGraphV1File(opts.analyzeExportPath);
   }
-  const distDir = resolveDistDir(opts.projectRoot, undefined, opts.distDir);
+  const distDir = resolveDistDir(opts.projectRoot, (await parseNextConfig(opts.projectRoot))?.distDir, opts.distDir);
   if (!hasAnalyzeArtifacts(distDir) || !projectSupportsAnalyzeExport(opts.projectRoot)) {
     const dataDir = resolveAnalyzeDirs(distDir).dataDir;
     const bin = dataDir ? await buildGraphFromBinary(dataDir, opts.projectRoot) : null;

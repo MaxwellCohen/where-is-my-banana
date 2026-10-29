@@ -2,6 +2,7 @@
 import { defineCommand, runMain } from "citty";
 import { resolve } from "node:path";
 import { scan } from "./scan.js";
+import { parseNextConfig } from "./config.js";
 import { writeVizGraph } from "./viz.js";
 import { readFileSync } from "node:fs";
 import { runWins, runNextAnalyze } from "./wins/index.js";
@@ -115,7 +116,7 @@ const vizBuildCommand = defineCommand({
     const viz = writeVizGraph({
       analyzeExportPath: analyzeExport,
       projectRoot,
-      distDir: args["dist-dir"],
+      distDir: args["dist-dir"] ?? (await parseNextConfig(projectRoot))?.distDir,
       outputPath,
       includeAsync: args.async,
       includeTraced: args.traced,
