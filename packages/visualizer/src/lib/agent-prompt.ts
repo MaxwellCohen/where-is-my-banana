@@ -3,57 +3,37 @@ export function buildAgentPrompt(visualizerUrl: string): string {
   const url = visualizerUrl.replace(/\/$/, "");
   return `Build a WIMB bundle-forest graph for this Next.js App Router project and open it in the hosted visualizer.
 
-Do not upgrade the app's \`next\` version. Prefer whatever analyze CLI this Next already ships.
+Do not upgrade the app's \`next\` version.
 
 ## Steps
 
-1. From the project root, capture Turbopack analyze artifacts (no package.json changes).
+Run everything from the project root (Node >= 20). WIMB runs from GitHub via npx; do not clone it or install anything.
 
-Detect the command (try in order; stop on first success):
-
-\`\`\`bash
-# Next where analyze is stable (e.g. 16.4+)
-pnpm exec next analyze --output
-# Older Next that still uses the experimental alias
-pnpm exec next experimental-analyze --output
-# same via npx if needed:
-# npx next analyze --output
-# npx next experimental-analyze --output
-\`\`\`
-
-Artifacts land under \`.next/diagnostics/analyze/\`.
-
-Optional richer path when \`next analyze export\` exists (Next 16.4+ graph-v1 JSONL):
+1. Capture the Turbopack module graph and a JSONL export (no package.json changes):
 
 \`\`\`bash
-SNAP="viz-$(date +%s)"
-pnpm exec next analyze --output --snapshot "$SNAP"
-pnpm exec next analyze export --snapshot "$SNAP" | gzip > .wimb/bundle-graph.jsonl.gz
+mkdir -p .wimb
+npx next analyze --output --snapshot wimb
+npx next analyze export --snapshot wimb > .wimb/graph.jsonl
 \`\`\`
 
-2. Build the route-rooted forest JSON with WIMB (Node ≥ 20):
+Older Next (16.1-16.3) has no \`analyze export\`: use \`npx next experimental-analyze --output\` and skip \`--analyze-export\` below.
+
+2. Build the forest and the ranked wins:
 
 \`\`\`bash
-# From binary artifacts (works for both analyze and experimental-analyze)
-npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --cwd . -o .wimb/bundle-graph.json
-
-# Or from a JSONL export if you created one above:
-# npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --analyze-export .wimb/bundle-graph.jsonl.gz -o .wimb/bundle-graph.json
+npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --analyze-export .wimb/graph.jsonl -o .wimb/bundle-graph.json
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --analyze-export .wimb/graph.jsonl --cwd .
 \`\`\`
 
-If \`viz\` is missing on that npx snapshot, clone https://github.com/MaxwellCohen/where-is-my-banana, run \`pnpm install && pnpm build\`, then:
-
-\`\`\`bash
-node /path/to/where-is-my-banana/packages/cli/dist/index.js viz build --cwd "$(pwd)" -o .wimb/bundle-graph.json
-\`\`\`
-
-Optional: add \`--async\` to include dynamic import edges.
+Outputs \`.wimb/bundle-graph.json\` and \`.wimb/wins.json\`. Add \`.wimb/\` to \`.gitignore\`. Optional: \`--async\` on \`viz build\` includes dynamic import edges.
 
 3. Open the visualizer and open the graph **locally in the browser** (nothing is uploaded to the host):
 
 - URL: ${url}
 - Click **Open local file**
 - Choose \`.wimb/bundle-graph.json\` from this project (parsed client-side only)
+- Click **Open wins.json** and choose \`.wimb/wins.json\`
 
 Privacy: do not POST the graph to any API, gist, or chat attachment unless the user explicitly asks. The hosted app has no server upload endpoint.
 
