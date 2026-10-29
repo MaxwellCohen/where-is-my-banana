@@ -86,7 +86,7 @@ execFileSync(
   [
     "push",
     "--force",
-    "https://github.com/MaxwellCohen/where-is-my-banana.git",
+    process.env.WIMB_NPX_REMOTE ?? "https://github.com/MaxwellCohen/where-is-my-banana.git",
     "npx:npx",
   ],
   { cwd: work, stdio: "inherit" },

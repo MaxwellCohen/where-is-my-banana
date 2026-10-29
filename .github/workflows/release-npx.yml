@@ -17,6 +17,8 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - name: Refresh npx branch
+        env:
+          WIMB_NPX_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
