@@ -8,6 +8,14 @@ import { formatBytes } from "@/lib/format";
 import { TreeNodeRow } from "./TreeNodeRow";
 import { ImporterTable } from "./ImporterTable";
 import { CopyPromptButton } from "./CopyPromptButton";
+import { WinsPanel } from "./WinsPanel";
+import {
+  firstLoadBytes,
+  loadWinsFromFile,
+  safeSavings,
+  winsForRoute,
+  type WinsReport,
+} from "@/lib/wins";
 
 type ViewMode = "importers" | "tree";
 
@@ -26,6 +34,9 @@ export function VisualizerApp() {
   const [selected, setSelected] = useState("/");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [wins, setWins] = useState<WinsReport | null>(null);
+  const [winId, setWinId] = useState<string | null>(null);
+  const [onlyWins, setOnlyWins] = useState(false);
 
   const bundle = useMemo(
     () => (graph ? sideBundle(graph, side) : { routes: [], trees: {} }),
@@ -93,6 +104,26 @@ export function VisualizerApp() {
     }
   }
 
+  async function onWins(file: File | null) {
+    if (!file) return;
+    setError(null);
+    try {
+      setWins(await loadWinsFromFile(file));
+      setWinId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const routeWins = winsForRoute(wins, selected);
+  const sortedWins = [...routeWins].sort((a, b) => b.totalSavedBytes - a.totalSavedBytes);
+  const activeWin = wins?.wins.find((w) => w.id === winId) ?? null;
+  const hl = activeWin ? { target: activeWin.edge.imported, chain: activeWin.chain } : null;
+  const visibleRoutes =
+    wins && onlyWins ? bundle.routes.filter((r) => winsForRoute(wins, r.route).length > 0) : bundle.routes;
+  const flBytes = firstLoadBytes(wins, selected);
+  const saveBytes = safeSavings(wins, selected);
+
   const hasServer = (graph?.sides?.server.routes.length ?? 0) > 0;
 
   return (
@@ -113,6 +144,14 @@ export function VisualizerApp() {
               accept=".jsonl,.gz,.json,.jsonl.gz"
               disabled={busy}
               onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="upload-btn">
+            {wins ? `wins.json (${wins.wins.length})` : "Open wins.json"}
+            <input
+              type="file"
+              accept=".json"
+              onChange={(e) => void onWins(e.target.files?.[0] ?? null)}
             />
           </label>
           <span className="meta">
@@ -187,8 +226,18 @@ export function VisualizerApp() {
         <div className="layout">
           <aside className="sidebar">
             <h2>Routes</h2>
+            {wins ? (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={onlyWins}
+                  onChange={(e) => setOnlyWins(e.target.checked)}
+                />
+                Only routes with wins
+              </label>
+            ) : null}
             <ul className="route-list">
-              {bundle.routes.map((r) => (
+              {visibleRoutes.map((r) => (
                 <li key={r.route}>
                   <button
                     type="button"
@@ -201,6 +250,13 @@ export function VisualizerApp() {
                 </li>
               ))}
             </ul>
+
+            {wins ? (
+              <>
+                <h2>Top wins{routeWins.length ? ` · ${selected}` : ""}</h2>
+                <WinsPanel wins={sortedWins} selectedId={winId} onSelect={setWinId} />
+              </>
+            ) : null}
 
             {sharedHotspots.length > 0 ? (
               <>
@@ -220,6 +276,15 @@ export function VisualizerApp() {
           </aside>
 
           <main className="main">
+            {wins ? (
+              <div className="route-head">
+                <strong>{selected}</strong>
+                <span>
+                  first load: {flBytes !== undefined ? formatBytes(flBytes) : "n/a"}
+                </span>
+                <span className="save">safe savings available: {formatBytes(saveBytes)}</span>
+              </div>
+            ) : null}
             {view === "importers" ? (
               <>
                 <p className="hint">
@@ -240,7 +305,7 @@ export function VisualizerApp() {
                 </div>
                 {tree ? (
                   <ul className="forest">
-                    <TreeNodeRow node={tree} depth={0} routeTotal={routeTotal || 1} />
+                    <TreeNodeRow node={tree} depth={0} routeTotal={routeTotal || 1} hl={hl} />
                   </ul>
                 ) : (
                   <p className="empty">No tree for this route on the {side} side.</p>

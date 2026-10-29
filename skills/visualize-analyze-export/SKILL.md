@@ -75,5 +75,5 @@ Demo data loads by default. Use **Load analyze export** to upload `.jsonl`, `.js
 
 ## Cross-links
 
-- Flat audit + rules: `skills/scan-client-bloat` (`wimb scan --analyze-export`).
+- Ranked fixes from the same export: `skills/reduce-client-js` (`wimb wins --analyze-export`). A win is one edge in this tree; `uniqueBytes` is the bytes lost if that edge is cut.
 - Next’s optimizer skill: `npx skills add vercel/next.js --skill next-bundle-optimizer` after you identify hotspots in the tree.

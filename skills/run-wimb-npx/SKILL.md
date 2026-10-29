@@ -18,25 +18,25 @@ Use this when the agent or user does **not** have the WIMB monorepo cloned and `
 ## Command
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb scan --cwd <project-root>
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd <project-root>
 ```
 
 ### Examples
 
 ```bash
-# Default source scan (estimated bytes)
+# Ranked wins from an existing analyze export (measured bytes)
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --analyze-export ./bundle-graph.jsonl
+
+# Compare to a previous run, fail CI on regressions
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --analyze-export ./bundle-graph.jsonl --compare .wimb/wins.prev.json --fail-on-safe-wins 20000
+
+# Legacy source scan
 npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb scan --cwd .
-
-# Measured bytes from existing analyze export
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb scan --cwd . --analyze-export ./bundle-graph.jsonl
-
-# CI-style outputs
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb scan --cwd . --format json,md,sarif --exit-threshold warning
 ```
 
-## After the scan
+## After the run
 
-Read `.wimb/wimb-report.json` in the **target project** (not in a temp npx cache). For interpretation and fixes, use `skills/scan-client-bloat/` and `skills/fix-client-bloat/`.
+Read `.wimb/wins.json` in the **target project** (not in a temp npx cache). Follow `skills/reduce-client-js/`. For legacy `wimb scan` findings, see `skills/fix-client-bloat/`.
 
 ## Maintainer: refresh GitHub `#npx`
 

@@ -3,32 +3,53 @@
 import { useState } from "react";
 import type { TreeNode } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
+import { pathsMatch } from "@/lib/wins";
 
 interface Props {
   node: TreeNode;
   depth: number;
   routeTotal: number;
+  /** Selected win: target module + chain, for highlighting. */
+  hl?: { target: string; chain: string[] } | null;
 }
 
-export function TreeNodeRow({ node, depth, routeTotal }: Props) {
+function hitKind(node: TreeNode, hl: Props["hl"]): "hit" | "chain" | null {
+  if (!hl || node.kind !== "module") return null;
+  const p = node.path ?? node.id;
+  if (pathsMatch(p, hl.target)) return "hit";
+  return hl.chain.some((c) => pathsMatch(p, c)) ? "chain" : null;
+}
+
+function containsHit(node: TreeNode, hl: Props["hl"]): boolean {
+  if (!hl) return false;
+  if (hitKind(node, hl) === "hit") return true;
+  return node.children.some((c) => containsHit(c, hl));
+}
+
+export function TreeNodeRow({ node, depth, routeTotal, hl }: Props) {
   const hasChildren = node.children.length > 0;
   const [open, setOpen] = useState(depth < 2 && !node.cycle);
+  const kind = hitKind(node, hl);
+  const forceOpen = !node.cycle && containsHit(node, hl);
+  const isOpen = open || forceOpen;
 
   const pct =
     routeTotal > 0 ? Math.min(100, Math.round((node.totalBytes / routeTotal) * 1000) / 10) : 0;
 
   return (
     <li className="tree-node">
-      <div className="tree-row" style={{ paddingLeft: `${depth * 1.1}rem` }}>
+      <div
+        className={`tree-row${kind === "hit" ? " win-hit" : kind === "chain" ? " win-chain-hit" : ""}`}
+        style={{ paddingLeft: `${depth * 1.1}rem` }}>
         <span className="tree-name">
           <button
             type="button"
             className="tree-toggle"
             disabled={!hasChildren}
-            aria-expanded={hasChildren ? open : undefined}
+            aria-expanded={hasChildren ? isOpen : undefined}
             onClick={() => hasChildren && setOpen((v) => !v)}
           >
-            {hasChildren ? (open ? "▾" : "▸") : "·"}
+            {hasChildren ? (isOpen ? "▾" : "▸") : "·"}
           </button>
           <span className="tree-label" title={node.path ?? node.id}>
             {node.label}
@@ -55,7 +76,7 @@ export function TreeNodeRow({ node, depth, routeTotal }: Props) {
           <span className="pct-label">{pct}%</span>
         </span>
       </div>
-      {open && hasChildren ? (
+      {isOpen && hasChildren ? (
         <ul className="tree-children">
           {node.children.map((child) => (
             <TreeNodeRow
@@ -63,6 +84,7 @@ export function TreeNodeRow({ node, depth, routeTotal }: Props) {
               node={child}
               depth={depth + 1}
               routeTotal={routeTotal}
+              hl={hl}
             />
           ))}
         </ul>

@@ -75,16 +75,9 @@ export interface DataTables {
   heavyPackages: Set<string>;
   frameworkPackages: Set<string>;
   categoryMap: Record<string, string[]>;
-  serverPackages: Set<string>;
-  authCryptoPackages: Set<string>;
-  devPackages: Set<string>;
-  thirdPartyScripts: Set<string>;
   onDemandLibs: Set<string>;
   heavyComponents: Set<string>;
   barrelPackages: Set<string>;
-  staticRenderers: Set<string>;
-  wasmPackages: Set<string>;
-  localePatterns: RegExp[];
 }
 
 export interface ParsedNextConfig {
@@ -119,10 +112,6 @@ export interface WimbConfig {
     searchIndexMinBytes: number;
     base64MinBytes: number;
     rscPayloadMaxFields: number;
-    /** Max allowed client-byte increase vs baseline for `wimb diff` / `--baseline` (0 = disabled). */
-    diffBudgetBytes: number;
-    /** Fail diff when new error-severity findings appear (default true via config merge). */
-    diffFailOnNewFindings: boolean;
   };
   ignores: {
     files: string[];
@@ -152,7 +141,7 @@ export interface Finding {
   /** Whether estimatedBytes came from real bundle attribution or a heuristic. */
   byteSource?: ByteSource;
   fixStrategy: FixStrategy;
-  source?: "wimb" | "e18e" | "knip" | "rsc-xray";
+  source?: "wimb" | "knip";
 }
 
 export type AnalyzeFormat = "export" | "binary" | "legacy-json" | "webpack-stats";
