@@ -9,6 +9,12 @@ import { TreeNodeRow } from "./TreeNodeRow";
 import { ImporterTable } from "./ImporterTable";
 import { CopyPromptButton } from "./CopyPromptButton";
 import { WinsPanel } from "./WinsPanel";
+import { TreemapView } from "./charts/TreemapView";
+import { IcicleView } from "./charts/IcicleView";
+import { SunburstView } from "./charts/SunburstView";
+import { RouteGraph } from "./charts/RouteGraph";
+import { RoutesChart } from "./charts/RoutesChart";
+import { findNode } from "@/lib/viz-layout";
 import {
   firstLoadBytes,
   loadWinsFromFile,
@@ -17,7 +23,17 @@ import {
   type WinsReport,
 } from "@/lib/wins";
 
-type ViewMode = "importers" | "tree";
+type ViewMode = "importers" | "tree" | "treemap" | "icicle" | "sunburst" | "ornaments" | "routes";
+
+const VIEWS: { id: ViewMode; label: string }[] = [
+  { id: "importers", label: "Sorted files" },
+  { id: "tree", label: "Tree" },
+  { id: "treemap", label: "Treemap" },
+  { id: "icicle", label: "Icicle" },
+  { id: "sunburst", label: "Sunburst" },
+  { id: "ornaments", label: "Graph" },
+  { id: "routes", label: "Routes" },
+];
 
 function sideBundle(graph: VizGraph, side: BundleSide): VizSide {
   if (graph.sides?.[side]) return graph.sides[side];
@@ -37,6 +53,7 @@ export function VisualizerApp() {
   const [wins, setWins] = useState<WinsReport | null>(null);
   const [winId, setWinId] = useState<string | null>(null);
   const [onlyWins, setOnlyWins] = useState(false);
+  const [zoomId, setZoomId] = useState<string | null>(null);
 
   const bundle = useMemo(
     () => (graph ? sideBundle(graph, side) : { routes: [], trees: {} }),
@@ -44,6 +61,7 @@ export function VisualizerApp() {
   );
   const tree = bundle.trees[selected];
   const routeTotal = tree?.totalBytes ?? 0;
+  const zoomRoot = (tree && zoomId ? findNode(tree, zoomId) : null) ?? tree;
 
   const importers = useMemo(() => {
     const ranked = bundle.importersByRoute?.[selected];
@@ -79,6 +97,11 @@ export function VisualizerApp() {
       .sort((a, b) => b.maxBytes * b.routeCount - a.maxBytes * a.routeCount)
       .slice(0, 8);
   }, [bundle]);
+
+  function selectRoute(route: string) {
+    setSelected(route);
+    setZoomId(null);
+  }
 
   function switchSide(next: BundleSide) {
     setSide(next);
@@ -188,20 +211,16 @@ export function VisualizerApp() {
               </button>
             </div>
             <div className="seg" role="group" aria-label="View mode">
-              <button
-                type="button"
-                className={view === "importers" ? "active" : undefined}
-                onClick={() => setView("importers")}
-              >
-                Sorted files
-              </button>
-              <button
-                type="button"
-                className={view === "tree" ? "active" : undefined}
-                onClick={() => setView("tree")}
-              >
-                Tree
-              </button>
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  className={view === v.id ? "active" : undefined}
+                  onClick={() => setView(v.id)}
+                >
+                  {v.label}
+                </button>
+              ))}
             </div>
             {view === "importers" ? (
               <label className="check">
@@ -242,7 +261,7 @@ export function VisualizerApp() {
                   <button
                     type="button"
                     className={r.route === selected ? "active" : undefined}
-                    onClick={() => setSelected(r.route)}
+                    onClick={() => selectRoute(r.route)}
                   >
                     <span className="route-name">{r.route}</span>
                     <span className="route-bytes">{formatBytes(r.totalBytes)}</span>
@@ -294,6 +313,40 @@ export function VisualizerApp() {
                 </p>
                 <ImporterTable rows={importers} />
               </>
+            ) : view === "ornaments" ? (
+              <RouteGraph
+                routes={visibleRoutes}
+                trees={bundle.trees}
+                selected={selected}
+                onSelect={selectRoute}
+              />
+            ) : view === "routes" ? (
+              <RoutesChart routes={visibleRoutes} selected={selected} onSelect={selectRoute} />
+            ) : view === "treemap" || view === "icicle" || view === "sunburst" ? (
+              zoomRoot ? (
+                <>
+                  <div className="crumbs">
+                    <span>
+                      {zoomRoot.label} · {formatBytes(zoomRoot.totalBytes)}
+                    </span>
+                    {zoomId && zoomRoot !== tree ? (
+                      <button type="button" onClick={() => setZoomId(null)}>
+                        Reset zoom
+                      </button>
+                    ) : null}
+                    <span>Click a block to zoom in; hover for details. Slices under 0.4% hidden.</span>
+                  </div>
+                  {view === "treemap" ? (
+                    <TreemapView root={zoomRoot} onZoom={(n) => setZoomId(n.id)} />
+                  ) : view === "icicle" ? (
+                    <IcicleView root={zoomRoot} onZoom={(n) => setZoomId(n.id)} />
+                  ) : (
+                    <SunburstView root={zoomRoot} onZoom={(n) => setZoomId(n.id)} />
+                  )}
+                </>
+              ) : (
+                <p className="empty">No tree for this route on the {side} side.</p>
+              )
             ) : (
               <>
                 <div className="cols">
