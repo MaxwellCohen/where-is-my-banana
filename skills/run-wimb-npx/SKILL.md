@@ -18,20 +18,20 @@ Use this when the agent or user does **not** have the WIMB monorepo cloned and `
 ## Command
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd <project-root>
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd <project-root>
 ```
 
 ### Examples
 
 ```bash
 # Ranked wins from an existing analyze export (measured bytes)
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --analyze-export ./bundle-graph.jsonl
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --analyze-export ./bundle-graph.jsonl
 
 # Compare to a previous run, fail CI on regressions
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --analyze-export ./bundle-graph.jsonl --compare .wimb/wins.prev.json --fail-on-safe-wins 20000
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --analyze-export ./bundle-graph.jsonl --compare .wimb/wins.prev.json --fail-on-safe-wins 20000
 
 # Legacy source scan
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb scan --cwd .
+npx --yes github:MaxwellCohen/where-is-my-banana#npx scan --cwd .
 ```
 
 ## After the run

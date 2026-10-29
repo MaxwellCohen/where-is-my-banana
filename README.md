@@ -10,7 +10,7 @@ Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack). No 
 
 ```bash
 cd your-next-app
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd .
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd .
 ```
 
 This runs `next analyze --output --snapshot wins` for you, then ranks the wins. Pass `--no-analyze` to reuse existing analyze data.
@@ -26,7 +26,7 @@ Track progress between runs:
 ```bash
 cp .wimb/wins.json .wimb/wins.prev.json     # before you change code
 # ...apply a fix, rerun the command...
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . --compare .wimb/wins.prev.json
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wimb/wins.prev.json
 ```
 
 ### From a local clone instead
@@ -68,7 +68,7 @@ Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply
 ## CI budget
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --cwd . \
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . \
   --compare .wimb/wins.prev.json \
   --budget-route 250000 \
   --fail-on-safe-wins 20000
