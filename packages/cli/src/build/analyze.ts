@@ -48,6 +48,8 @@ export function resolveAnalyzeDirs(distDir: string): {
 
 export function hasAnalyzeArtifacts(distDir: string): boolean {
   const { analyzeDir, dataDir } = resolveAnalyzeDirs(distDir);
+  // Next 16.4+ writes snapshots under analyze/history/
+  if (existsSync(join(analyzeDir, "history", "history.json"))) return true;
   if (dataDir && (existsSync(join(dataDir, "modules.data")) || discoverRouteAnalyzeFiles(dataDir).length > 0)) {
     return true;
   }

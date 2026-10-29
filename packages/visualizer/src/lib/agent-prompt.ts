@@ -35,10 +35,10 @@ pnpm exec next analyze export --snapshot "$SNAP" | gzip > .wimb/bundle-graph.jso
 
 \`\`\`bash
 # From binary artifacts (works for both analyze and experimental-analyze)
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb viz build --cwd . -o .wimb/bundle-graph.json
+npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --cwd . -o .wimb/bundle-graph.json
 
 # Or from a JSONL export if you created one above:
-# npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb viz build --analyze-export .wimb/bundle-graph.jsonl.gz -o .wimb/bundle-graph.json
+# npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --analyze-export .wimb/bundle-graph.jsonl.gz -o .wimb/bundle-graph.json
 \`\`\`
 
 If \`viz\` is missing on that npx snapshot, clone https://github.com/MaxwellCohen/where-is-my-banana, run \`pnpm install && pnpm build\`, then:
