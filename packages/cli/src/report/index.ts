@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { resolveOutputDir } from "../paths.js";
 import type { ByteSource, ScanReport, Finding, Severity } from "../types.js";
 import { toMarkdown } from "./markdown.js";
-import { toSarif } from "./sarif.js";
 
 const SEVERITY_ORDER: Record<Severity, number> = { error: 3, warning: 2, info: 1 };
 
@@ -65,9 +64,6 @@ export function writeReports(
   }
   if (formats.has("md") || formats.size === 0) {
     writeFileSync(join(outputDir, "wimb-report.md"), toMarkdown(report));
-  }
-  if (formats.has("sarif")) {
-    writeFileSync(join(outputDir, "wimb-report.sarif"), JSON.stringify(toSarif(report), null, 2));
   }
 }
 

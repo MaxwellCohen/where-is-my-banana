@@ -25,22 +25,6 @@
     "oxc-parser": "^0.75.0",
     "oxc-resolver": "^11.0.0"
   },
-  "optionalDependencies": {
-    "@e18e/cli": "^0.7.0",
-    "@rsc-xray/analyzer": "^0.8.0"
-  },
-  "peerDependencies": {
-    "@e18e/cli": ">=0.7.0",
-    "@rsc-xray/analyzer": ">=0.8.0"
-  },
-  "peerDependenciesMeta": {
-    "@e18e/cli": {
-      "optional": true
-    },
-    "@rsc-xray/analyzer": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@oxc-project/types": "0.75.1",
     "@types/node": "^22.15.0",

@@ -1,0 +1,52 @@
+{
+  "version": "2",
+  "timestamp": "2026-01-01T00:00:00.000Z",
+  "projectRoot": "/demo",
+  "byteSource": "measured",
+  "routes": [
+    { "route": "/", "firstLoadBytes": 245000 },
+    { "route": "/dashboard", "firstLoadBytes": 380000 }
+  ],
+  "wins": [
+    {
+      "id": "lazy:src/app/dashboard/page.tsx:src/components/Chart.tsx",
+      "fixKind": "lazy",
+      "safety": "safe",
+      "safetyReasons": [],
+      "usage": "conditional-render",
+      "edge": { "importer": "src/app/dashboard/page.tsx", "imported": "src/components/Chart.tsx", "packageName": null },
+      "loc": { "line": 3, "column": 0 },
+      "routes": { "/dashboard": 92000 },
+      "totalSavedBytes": 92000,
+      "byteSource": "measured",
+      "chain": ["src/app/dashboard/page.tsx", "src/components/Chart.tsx"],
+      "edit": {
+        "summary": "Lazy-load Chart (only rendered after a toggle)",
+        "originalImport": "import Chart from '../../components/Chart'",
+        "replacementImport": "const Chart = dynamic(() => import('../../components/Chart'), { ssr: false, loading: () => null })",
+        "steps": ["Add import dynamic from 'next/dynamic'", "Replace the static import with the dynamic call"],
+        "verify": "next build && wimb wins"
+      }
+    },
+    {
+      "id": "swap-package:src/app/page.tsx:node_modules/moment/moment.js",
+      "fixKind": "swap-package",
+      "safety": "needs-review",
+      "safetyReasons": ["above-the-fold", "shared-with-eager-route"],
+      "usage": "always-rendered",
+      "edge": { "importer": "src/app/page.tsx", "imported": "node_modules/moment/moment.js", "packageName": "moment" },
+      "loc": { "line": 1, "column": 0 },
+      "routes": { "/": 58000, "/dashboard": 41000 },
+      "totalSavedBytes": 58000,
+      "byteSource": "measured",
+      "chain": ["src/app/page.tsx", "node_modules/moment/moment.js"],
+      "edit": {
+        "summary": "Replace moment with date-fns",
+        "originalImport": "import moment from 'moment'",
+        "replacementImport": "import { format } from 'date-fns'",
+        "steps": ["pnpm add date-fns", "Rewrite moment() calls to date-fns equivalents"],
+        "verify": "next build && wimb wins"
+      }
+    }
+  ]
+}

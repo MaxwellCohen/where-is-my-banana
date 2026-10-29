@@ -16,9 +16,7 @@ describe("e2e scan", () => {
     expect(forest.pages[0]?.route).toBe("/");
     expect(forest.entries["app/page.tsx"]).toBeDefined();
     const ruleIds = report.findings.map((f: { ruleId: string }) => f.ruleId);
-    expect(ruleIds).toContain("server-logic-in-client");
     expect(ruleIds).toContain("barrel-import");
-    expect(ruleIds).toContain("env-var-misuse");
     expect(ruleIds).toContain("heavy-client-import");
     expect(code).toBe(1);
   });

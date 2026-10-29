@@ -2,15 +2,12 @@
 import { defineCommand, runMain } from "citty";
 import { resolve } from "node:path";
 import { scan } from "./scan.js";
-import { loadConfig } from "./config.js";
-import {
-  compareReports,
-  exitCodeForDiff,
-  loadReport,
-  writeDiffReport,
-  toDiffMarkdown,
-} from "./diff.js";
 import { writeVizGraph } from "./viz.js";
+import { readFileSync } from "node:fs";
+import { runWins } from "./wins/index.js";
+import { formatWinsTerminal, writeWins } from "./wins/output.js";
+import { checkBudget, compareWins } from "./wins/compare.js";
+import type { WinsReport } from "./wins/types.js";
 
 const scanCommand = defineCommand({
   meta: { name: "scan", description: "Scan a Next.js App Router project for client bloat" },
@@ -35,23 +32,13 @@ const scanCommand = defineCommand({
     },
     format: {
       type: "string",
-      description: "Output formats: json,md,sarif (comma-separated)",
+      description: "Output formats: json,md (comma-separated)",
       default: "json,md",
     },
     "exit-threshold": {
       type: "string",
       description: "Exit 1 if findings at or above this severity",
       default: "error",
-    },
-    e18e: { type: "boolean", description: "Merge @e18e/cli diagnostics", default: false },
-    "rsc-xray": {
-      type: "boolean",
-      description: "Merge @rsc-xray/analyzer diagnostics (opt-in)",
-      default: false,
-    },
-    baseline: {
-      type: "string",
-      description: "Compare against a prior wimb-report.json and write wimb-diff.*",
     },
     "forest-compact": {
       type: "boolean",
@@ -77,38 +64,9 @@ const scanCommand = defineCommand({
         : undefined,
       formats,
       exitThreshold: args["exit-threshold"] as "error" | "warning" | "info",
-      e18e: args.e18e,
-      rscXray: args["rsc-xray"],
-      baseline: args.baseline,
       forestCompact: args["forest-compact"] || args["no-ast"],
     });
     process.exit(code);
-  },
-});
-
-const diffCommand = defineCommand({
-  meta: {
-    name: "diff",
-    description: "Compare two wimb-report.json files (baseline vs current)",
-  },
-  args: {
-    baseline: { type: "positional", description: "Path to baseline wimb-report.json", required: true },
-    current: { type: "positional", description: "Path to current wimb-report.json", required: true },
-    cwd: {
-      type: "string",
-      description: "Project root for writing wimb-diff.* (defaults to cwd)",
-      default: process.cwd(),
-    },
-  },
-  async run({ args }) {
-    const projectRoot = resolve(args.cwd);
-    const config = await loadConfig(projectRoot);
-    const baseline = loadReport(resolve(args.baseline as string));
-    const current = loadReport(resolve(args.current as string));
-    const diff = compareReports(baseline, current, config);
-    writeDiffReport(projectRoot, diff);
-    console.log(toDiffMarkdown(diff));
-    process.exit(exitCodeForDiff(diff, config));
   },
 });
 
@@ -176,9 +134,60 @@ const vizCommand = defineCommand({
   subCommands: { build: vizBuildCommand },
 });
 
+const winsCommand = defineCommand({
+  meta: { name: "wins", description: "Rank import edges whose removal shrinks first-load client JS" },
+  args: {
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    "analyze-export": { type: "string", description: "next analyze export JSONL (.jsonl or .jsonl.gz)" },
+    "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
+    snapshot: { type: "string", description: "Named next analyze snapshot" },
+    "min-bytes": { type: "string", description: "Drop edges saving fewer bytes than this" },
+    top: { type: "string", description: "Number of wins to print", default: "10" },
+    json: { type: "boolean", description: "Print WinsReport JSON to stdout", default: false },
+    compare: { type: "string", description: "Previous wins.json to compare against" },
+    "budget-route": { type: "string", description: "Fail if any route first-load exceeds this many bytes" },
+    "fail-on-safe-wins": { type: "string", description: "Fail if safe wins exceed this many bytes" },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let report: WinsReport;
+    try {
+      report = await runWins({
+        projectRoot,
+        analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
+        distDir: args["dist-dir"],
+        snapshot: args.snapshot,
+        minBytes: args["min-bytes"] ? Number(args["min-bytes"]) : undefined,
+      });
+    } catch (err) {
+      console.error(`wimb: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    const { jsonPath, mdPath } = writeWins(projectRoot, report);
+    if (args.json) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(formatWinsTerminal(report, { top: Number(args.top) || 10 }));
+      console.log(`\nwimb: wrote ${jsonPath} and ${mdPath}`);
+    }
+    if (args.compare) {
+      const prev = JSON.parse(readFileSync(resolve(projectRoot, args.compare), "utf-8")) as WinsReport;
+      const cmp = compareWins(prev, report);
+      console.error("wimb: first-load delta vs previous");
+      for (const r of cmp.routes) console.error(`  ${r.route}  ${r.delta >= 0 ? "+" : ""}${(r.delta / 1024).toFixed(1)} KB`);
+      console.error(`  wins resolved: ${cmp.resolved.length}, new: ${cmp.introduced.length}`);
+    }
+    const violations = checkBudget(report, {
+      routeBudgetBytes: args["budget-route"] ? Number(args["budget-route"]) : undefined,
+      maxSafeWinBytes: args["fail-on-safe-wins"] ? Number(args["fail-on-safe-wins"]) : undefined,
+    });
+    for (const v of violations) console.error(`wimb: ${v.message}`);
+    process.exit(violations.length ? 1 : 0);
+  },
+});
+
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, diff: diffCommand, viz: vizCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand },
 });
 
 runMain(main);

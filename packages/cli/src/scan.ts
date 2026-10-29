@@ -10,9 +10,7 @@ import { buildReport, writeReports, exitCodeForReport } from "./report/index.js"
 import { printFindingsToTerminal } from "./report/terminal.js";
 import { writeForestReport } from "./forest/builder.js";
 import { validateProject } from "./validate.js";
-import { runE18eAnalysis } from "./external/e18e.js";
 import { runKnipAnalysis } from "./external/knip.js";
-import { runRscXrayAnalysis } from "./external/rsc-xray.js";
 import { measureClientPackageSizes } from "./analysis/package-size.js";
 
 export interface ScanOptions {
@@ -21,9 +19,6 @@ export interface ScanOptions {
   distDir?: string;
   formats?: string[];
   exitThreshold?: "error" | "warning" | "info";
-  e18e?: boolean;
-  rscXray?: boolean;
-  baseline?: string;
   skipValidation?: boolean;
   forestCompact?: boolean;
   /** Named `next analyze` snapshot (Next 16.4+). */
@@ -99,43 +94,12 @@ export async function scan(opts: ScanOptions): Promise<number> {
     }
   }
 
-  if (opts.e18e) {
-    for (const finding of await runE18eAnalysis(projectRoot)) {
-      if (shouldIgnore(finding.ruleId)) continue;
-      findings.push(finding);
-    }
-  }
-
-  if (opts.rscXray) {
-    for (const finding of await runRscXrayAnalysis(projectRoot, config)) {
-      if (shouldIgnore(finding.ruleId)) continue;
-      findings.push(finding);
-    }
-  }
-
   const mode = opts.build || byteAttribution?.measured ? "build" : "source";
   const report = buildReport(projectRoot, mode, findings, {
     byteSource: byteAttribution?.measured ? "measured" : "estimated",
   });
   const formats = new Set(opts.formats ?? ["json", "md"]);
   writeReports(projectRoot, report, formats);
-
-  if (opts.baseline) {
-    const { compareReports, writeDiffReport, exitCodeForDiff } = await import("./diff.js");
-    const diff = compareReports(opts.baseline, report, config);
-    writeDiffReport(projectRoot, diff);
-    console.log(
-      `wimb: diff vs baseline — Δbytes ${diff.byteDelta}, +${diff.newFindings.length}/-${diff.resolvedFindings.length} findings`,
-    );
-    if (exitCodeForDiff(diff, config) !== 0) {
-      // Still print findings; exit code applied at the end
-      printFindingsToTerminal(report);
-      console.log(
-        `wimb: ${report.summary.total} findings, budget exceeded → ${resolveOutputDir(projectRoot)}`,
-      );
-      return 1;
-    }
-  }
 
   console.log("wimb: writing forest.json...");
   const forest = writeForestReport(projectRoot, graph, byteAttribution, {
@@ -149,6 +113,10 @@ export async function scan(opts: ScanOptions): Promise<number> {
   console.log(
     `wimb: ${report.summary.total} findings (${report.summary.bySeverity.error} errors, ${report.summary.bySeverity.warning} warnings), ${forest.pages.length} pages → ${resolveOutputDir(projectRoot)}`,
   );
+
+  if (byteAttribution?.measured) {
+    console.log("wimb: measured graph available — run `wimb wins` for ranked, agent-ready fixes");
+  }
 
   return exitCodeForReport(report, opts.exitThreshold ?? "error");
 }

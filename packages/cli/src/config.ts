@@ -28,8 +28,6 @@ export const DEFAULT_CONFIG: WimbConfig = {
     searchIndexMinBytes: 20_480,
     base64MinBytes: 5_120,
     rscPayloadMaxFields: 3,
-    diffBudgetBytes: 0,
-    diffFailOnNewFindings: true,
   },
   ignores: { files: [], rules: [] },
   severityOverrides: {},
