@@ -8,5 +8,5 @@ export default defineConfig({
   clean: true,
   dts: true,
   // Standalone npx/tarball installs (no npm publish for @wimb/graph-v1).
-  noExternal: ["@wimb/graph-v1"],
+  noExternal: [/^@wimb\/graph-v1/],
 });

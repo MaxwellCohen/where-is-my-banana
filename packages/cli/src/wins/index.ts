@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parseGraphV1Jsonl } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
+import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
 import { attributeRoutes } from "./attribute.js";
@@ -44,6 +45,17 @@ function exportJsonl(projectRoot: string, distDir: string, snapshot?: string): P
   });
 }
 
+export function runNextAnalyze(projectRoot: string, snapshot: string): Promise<void> {
+  const args = ["analyze", "--output", "--snapshot", snapshot];
+  const local = join(projectRoot, "node_modules", ".bin", "next");
+  const [command, fullArgs] = existsSync(local) ? [local, args] : ["npx", ["next", ...args]];
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, fullArgs, { cwd: projectRoot, stdio: ["ignore", "inherit", "inherit"] });
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`next analyze failed (exit ${code})`))));
+  });
+}
+
 async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
   if (opts.analyzeExportPath) {
     if (!existsSync(opts.analyzeExportPath)) {
@@ -51,7 +63,7 @@ async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
     }
     return parseGraphV1File(opts.analyzeExportPath);
   }
-  const distDir = resolveDistDir(opts.projectRoot, undefined, opts.distDir);
+  const distDir = resolveDistDir(opts.projectRoot, (await parseNextConfig(opts.projectRoot))?.distDir, opts.distDir);
   if (!hasAnalyzeArtifacts(distDir) || !projectSupportsAnalyzeExport(opts.projectRoot)) {
     const dataDir = resolveAnalyzeDirs(distDir).dataDir;
     const bin = dataDir ? await buildGraphFromBinary(dataDir, opts.projectRoot) : null;

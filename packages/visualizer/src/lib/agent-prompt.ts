@@ -22,8 +22,8 @@ Older Next (16.1-16.3) has no \`analyze export\`: use \`npx next experimental-an
 2. Build the forest and the ranked wins:
 
 \`\`\`bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb viz build --analyze-export .wimb/graph.jsonl -o .wimb/bundle-graph.json
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wimb wins --analyze-export .wimb/graph.jsonl --cwd .
+npx --yes github:MaxwellCohen/where-is-my-banana#npx viz build --analyze-export .wimb/graph.jsonl -o .wimb/bundle-graph.json
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --analyze-export .wimb/graph.jsonl --cwd .
 \`\`\`
 
 Outputs \`.wimb/bundle-graph.json\` and \`.wimb/wins.json\`. Add \`.wimb/\` to \`.gitignore\`. Optional: \`--async\` on \`viz build\` includes dynamic import edges.
