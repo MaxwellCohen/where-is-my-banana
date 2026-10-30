@@ -7,6 +7,7 @@ import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
 import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
+import { buildGraphFromVite, isViteProject } from "./vite.js";
 import { attributeRoutes } from "./attribute.js";
 import { classifyWins } from "./classify.js";
 import type { WinsReport } from "./types.js";
@@ -17,6 +18,8 @@ export interface RunWinsOptions {
   distDir?: string;
   snapshot?: string;
   minBytes?: number;
+  /** Force the Vite path (auto-detected when vite is a dependency and next is not). */
+  vite?: boolean;
 }
 
 const NO_DATA_MESSAGE =
@@ -63,6 +66,7 @@ async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
     }
     return parseGraphV1File(opts.analyzeExportPath);
   }
+  if (opts.vite ?? isViteProject(opts.projectRoot)) return buildGraphFromVite(opts.projectRoot);
   const distDir = resolveDistDir(opts.projectRoot, (await parseNextConfig(opts.projectRoot))?.distDir, opts.distDir);
   if (!hasAnalyzeArtifacts(distDir) || !projectSupportsAnalyzeExport(opts.projectRoot)) {
     const dataDir = resolveAnalyzeDirs(distDir).dataDir;

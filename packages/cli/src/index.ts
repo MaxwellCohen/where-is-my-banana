@@ -6,6 +6,7 @@ import { parseNextConfig } from "./config.js";
 import { writeVizGraph } from "./viz.js";
 import { readFileSync } from "node:fs";
 import { runWins, runNextAnalyze } from "./wins/index.js";
+import { isViteProject } from "./wins/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
 import type { WinsReport } from "./wins/types.js";
@@ -143,6 +144,7 @@ const winsCommand = defineCommand({
     "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
     snapshot: { type: "string", description: "Named next analyze snapshot" },
     analyze: { type: "boolean", description: "Run `next analyze --output` first (use --no-analyze to reuse existing data)", default: true },
+    vite: { type: "boolean", description: "Analyze a Vite app via an in-process build (auto-detected when vite is a dependency and next is not)" },
     "min-bytes": { type: "string", description: "Drop edges saving fewer bytes than this" },
     top: { type: "string", description: "Number of wins to print", default: "10" },
     json: { type: "boolean", description: "Print WinsReport JSON to stdout", default: false },
@@ -155,12 +157,14 @@ const winsCommand = defineCommand({
     let report: WinsReport;
     try {
       const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
-      if (args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
+      const vite = args.vite ?? isViteProject(projectRoot);
+      if (!vite && args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
       report = await runWins({
         projectRoot,
         analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
         distDir: args["dist-dir"],
         snapshot,
+        vite,
         minBytes: args["min-bytes"] ? Number(args["min-bytes"]) : undefined,
       });
     } catch (err) {

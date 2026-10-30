@@ -29,6 +29,14 @@ cp .wimb/wins.json .wimb/wins.prev.json     # before you change code
 npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wimb/wins.prev.json
 ```
 
+### Vite apps
+
+Auto-detected when `vite` is a dependency and `next` is not (or pass `--vite`). Runs `vite build` in-process (nothing written to `dist/`) and ranks wins from Rollup's chunk/module graph. One route per HTML entry; bytes are gzip-estimated per chunk and cover the entry's static-import closure.
+
+```bash
+npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --vite
+```
+
 ### From a local clone instead
 
 ```bash
