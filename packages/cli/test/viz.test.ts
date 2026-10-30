@@ -46,13 +46,13 @@ const JSONL = [
 ].join("\n");
 
 describe("writeVizGraph", () => {
-  it("writes a schemaVersion 1 forest JSON", () => {
+  it("writes a schemaVersion 1 forest JSON", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wimb-viz-"));
     try {
       const exportPath = join(dir, "graph.jsonl.gz");
       const outPath = join(dir, "bundle-graph.json");
       writeFileSync(exportPath, gzipSync(JSONL));
-      const viz = writeVizGraph({ analyzeExportPath: exportPath, outputPath: outPath });
+      const viz = await writeVizGraph({ analyzeExportPath: exportPath, outputPath: outPath });
       expect(viz.schemaVersion).toBe(2);
       expect(viz.sides?.client).toBeDefined();
       expect(viz.sides?.server).toBeDefined();

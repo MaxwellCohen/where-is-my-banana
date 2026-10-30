@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAppSourcePath } from "@wimb/graph-v1";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { loadDataTables } from "../data/index.js";
 import { loadReplacements } from "../external/module-replacements.js";
 import { analyzeImportUsage, moduleFacts, type ImportUsage } from "./usage-analyze.js";
@@ -17,6 +18,22 @@ import type {
 export interface ClassifyContext {
   projectRoot: string;
   byteSource: "measured" | "estimated";
+  framework?: Framework;
+}
+
+export type Framework = "next" | "react" | "solid" | "vue" | "svelte" | "generic";
+
+export function detectFramework(projectRoot: string): Framework {
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    for (const [dep, fw] of [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "react"]] as const) {
+      if (deps[dep]) return fw;
+    }
+  } catch {
+    // no package.json
+  }
+  return "generic";
 }
 
 const DROP_BELOW_BYTES = 10 * 1024;
@@ -87,15 +104,25 @@ async function readText(path: string): Promise<string | null> {
 
 const isIdent = (s: string) => /^[A-Za-z_$][\w$]*$/.test(s);
 
-function dynamicDecls(u: ImportUsage, opts: string): string[] {
+const LAZY_IMPORT: Partial<Record<Framework, string>> = {
+  react: `import { lazy } from 'react';`,
+  solid: `import { lazy } from 'solid-js';`,
+  vue: `import { defineAsyncComponent } from 'vue';`,
+};
+
+/** Lazy component declarations; non-Next frameworks expect a { default } module shape. */
+function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
   return u.bindings.map((b) => {
-    const importExpr =
-      b.kind === "default"
-        ? `import('${u.specifier}')`
-        : b.kind === "named"
-          ? `import('${u.specifier}').then((m) => m.${isIdent(b.imported) ? b.imported : `["${b.imported}"]`})`
-          : `import('${u.specifier}')`;
-    return `const ${b.local} = dynamic(() => ${importExpr}, ${opts});`;
+    const spec = `'${u.specifier}'`;
+    const named = b.kind === "named" ? (isIdent(b.imported) ? `m.${b.imported}` : `m["${b.imported}"]`) : null;
+    if (fw === "next") {
+      const expr = named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`;
+      return `const ${b.local} = dynamic(() => ${expr}, ${opts});`;
+    }
+    const expr = named ? `import(${spec}).then((m) => ({ default: ${named} }))` : `import(${spec})`;
+    if (fw === "vue") return `const ${b.local} = defineAsyncComponent(() => ${expr});`;
+    if (fw === "react" || fw === "solid") return `const ${b.local} = lazy(() => ${expr});`;
+    return `const ${b.local} = () => ${named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`};`;
   });
 }
 
@@ -294,7 +321,7 @@ function buildEdit(
         return {
           summary: `Defer loading of ${target} from ${file}`,
           originalImport: original,
-          steps: [`Load ${target} lazily in ${file} (next/dynamic or dynamic import()).`],
+          steps: [`Load ${target} lazily in ${file} (next/dynamic, lazy(), or dynamic import()).`],
           verify,
         };
       }
@@ -311,19 +338,34 @@ function buildEdit(
           verify,
         };
       }
-      const ssrFalse = usage !== "always-rendered" && (u.isClient || !u.isPageOrLayout);
+      const fw = ctx.framework ?? "next";
+      const ssrFalse = fw === "next" && usage !== "always-rendered" && (u.isClient || !u.isPageOrLayout);
       const opts = ssrFalse ? "{ ssr: false, loading: () => null }" : "{ loading: () => null }";
       const stepsNamed = u.bindings.some((b) => b.kind === "named");
+      const helper = { next: "next/dynamic", react: "React.lazy", solid: "solid-js lazy", vue: "defineAsyncComponent", svelte: "dynamic import()", generic: "dynamic import()" }[fw];
+      const header = fw === "next" ? [`import dynamic from 'next/dynamic';`] : LAZY_IMPORT[fw] ? [LAZY_IMPORT[fw]!] : [];
+      const boundary =
+        fw === "react" || fw === "solid"
+          ? [`Wrap the rendered component in <Suspense fallback={...}> (${fw === "solid" ? "solid-js" : "react"}).`]
+          : fw === "vue"
+            ? ["Optionally pass { loadingComponent } to defineAsyncComponent or wrap in <Suspense>."]
+            : [];
       return {
-        summary: `Lazy-load ${target} with next/dynamic in ${file}`,
+        summary: `Lazy-load ${target} with ${helper} in ${file}`,
         originalImport: original,
-        replacementImport: [`import dynamic from 'next/dynamic';`, ...dynamicDecls(u, opts)].join("\n"),
+        replacementImport: [...header, ...lazyDecls(u, opts, fw)].join("\n"),
         steps: [
-          `Replace the static import in ${file} with the next/dynamic form.`,
-          ...(stepsNamed ? ["Named export: the .then(m => m.X) mapping selects the export."] : []),
-          ssrFalse
-            ? "ssr:false is safe because the component renders only conditionally."
-            : "Keep SSR enabled (above-the-fold content); consider a sized loading placeholder to avoid layout shift.",
+          `Replace the static import in ${file} with the ${helper} form.`,
+          ...(stepsNamed ? [fw === "next" ? "Named export: the .then(m => m.X) mapping selects the export." : "Named export: the .then(m => ({ default: m.X })) mapping adapts it to a default export."] : []),
+          ...boundary,
+          "If the binding is a value (not a component), `await import()` it where first used instead.",
+          ...(fw === "next"
+            ? [
+                ssrFalse
+                  ? "ssr:false is safe because the component renders only conditionally."
+                  : "Keep SSR enabled (above-the-fold content); consider a sized loading placeholder to avoid layout shift.",
+              ]
+            : []),
           "Confirm no layout shift when the component appears.",
         ],
         verify,

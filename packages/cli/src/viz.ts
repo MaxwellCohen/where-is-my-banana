@@ -7,6 +7,7 @@ import {
 } from "@wimb/graph-v1";
 import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
 import { resolveAnalyzeDirs, resolveDistDir } from "./build/analyze.js";
+import { buildGraphFromVite, isViteProject } from "./wins/vite.js";
 import { buildRouteForestFromBinary } from "./viz/binary-forest.js";
 
 export interface VizBuildOptions {
@@ -21,7 +22,7 @@ export interface VizBuildOptions {
   includeTraced?: boolean;
 }
 
-export function buildVizGraph(opts: VizBuildOptions): VizGraph {
+export async function buildVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
   if (opts.analyzeExportPath) {
     const graph = parseGraphV1File(opts.analyzeExportPath);
     const forestOpts: BuildForestOptions = {
@@ -32,6 +33,7 @@ export function buildVizGraph(opts: VizBuildOptions): VizGraph {
   }
 
   const projectRoot = opts.projectRoot ?? process.cwd();
+  if (isViteProject(projectRoot)) return buildDualRouteForest(await buildGraphFromVite(projectRoot));
   const distDir = resolveDistDir(projectRoot, undefined, opts.distDir);
   const { dataDir } = resolveAnalyzeDirs(distDir);
   if (!dataDir || !existsSync(dataDir)) {
@@ -45,8 +47,8 @@ export function buildVizGraph(opts: VizBuildOptions): VizGraph {
   return buildRouteForestFromBinary(dataDir);
 }
 
-export function writeVizGraph(opts: VizBuildOptions): VizGraph {
-  const viz = buildVizGraph(opts);
+export async function writeVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
+  const viz = await buildVizGraph(opts);
   const out = resolve(opts.outputPath);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(viz, null, 2)}\n`, "utf-8");

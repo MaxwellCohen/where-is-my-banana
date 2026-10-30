@@ -114,7 +114,7 @@ const vizBuildCommand = defineCommand({
     const analyzeExport = args["analyze-export"]
       ? resolve(projectRoot, args["analyze-export"] as string)
       : undefined;
-    const viz = writeVizGraph({
+    const viz = await writeVizGraph({
       analyzeExportPath: analyzeExport,
       projectRoot,
       distDir: args["dist-dir"] ?? (await parseNextConfig(projectRoot))?.distDir,

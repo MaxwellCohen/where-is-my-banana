@@ -32,13 +32,13 @@ describe("buildRouteForestFromBinary", () => {
 });
 
 describe("writeVizGraph binary path", () => {
-  it("reads --dist-dir style artifacts without analyze-export", () => {
+  it("reads --dist-dir style artifacts without analyze-export", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wimb-viz-dist-"));
     try {
       // Real layout: .next/diagnostics/analyze/data/*
       writeAnalyzeBinaryFixture(join(dir, ".next", "diagnostics", "analyze"));
       const out = join(dir, "bundle-graph.json");
-      const viz = writeVizGraph({
+      const viz = await writeVizGraph({
         projectRoot: dir,
         distDir: ".next",
         outputPath: out,
