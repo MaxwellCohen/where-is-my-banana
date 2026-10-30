@@ -6,8 +6,9 @@ import {
   type VizGraph,
 } from "@wimb/graph-v1";
 import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
+import { parseNextConfig } from "./config.js";
 import { resolveAnalyzeDirs, resolveDistDir } from "./build/analyze.js";
-import { buildGraphFromVite, isViteProject } from "./wins/vite.js";
+import { buildGraphFromVite, isViteProject } from "./sources/vite.js";
 import { buildRouteForestFromBinary } from "./viz/binary-forest.js";
 
 export interface VizBuildOptions {
@@ -20,6 +21,8 @@ export interface VizBuildOptions {
   outputPath: string;
   includeAsync?: boolean;
   includeTraced?: boolean;
+  /** Force the Vite path (auto-detected when vite is a dependency and next is not). */
+  vite?: boolean;
 }
 
 export async function buildVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
@@ -33,8 +36,8 @@ export async function buildVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
   }
 
   const projectRoot = opts.projectRoot ?? process.cwd();
-  if (isViteProject(projectRoot)) return buildDualRouteForest(await buildGraphFromVite(projectRoot));
-  const distDir = resolveDistDir(projectRoot, undefined, opts.distDir);
+  if (opts.vite ?? isViteProject(projectRoot)) return buildDualRouteForest(await buildGraphFromVite(projectRoot));
+  const distDir = resolveDistDir(projectRoot, (await parseNextConfig(projectRoot))?.distDir, opts.distDir);
   const { dataDir } = resolveAnalyzeDirs(distDir);
   if (!dataDir || !existsSync(dataDir)) {
     throw new Error(

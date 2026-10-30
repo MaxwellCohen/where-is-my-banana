@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, relative, extname, dirname } from "node:path";
 import { parseSync } from "oxc-parser";
 import { ResolverFactory } from "oxc-resolver";
@@ -6,10 +6,22 @@ import { extractSignals } from "./signals.js";
 import { extractDirectives } from "./directives.js";
 import { extractImports } from "./imports.js";
 import { locFromSpan } from "./loc.js";
+import { bfsReach } from "./reach.js";
+import { exportedName, toAst } from "./ast-walk.js";
 import type { Module, ModuleGraph, ExportInfo } from "../types.js";
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
 const APP_DIRS = ["app", "src/app", "pages", "src/pages", "middleware.ts", "src/middleware.ts"];
+
+function visitedKey(filePath: string): string {
+  let key = filePath;
+  try {
+    key = realpathSync(filePath);
+  } catch {
+    // missing file: fall back to the raw path
+  }
+  return process.platform === "win32" ? key.toLowerCase() : key;
+}
 
 function findTsconfig(projectRoot: string): string | null {
   for (const name of ["tsconfig.json", "jsconfig.json"]) {
@@ -19,7 +31,9 @@ function findTsconfig(projectRoot: string): string | null {
   return null;
 }
 
-export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
+export async function buildGraph(
+  projectRoot: string,
+): Promise<ModuleGraph & { warnings: string[] }> {
   const tsconfig = findTsconfig(projectRoot);
   const resolver = new ResolverFactory({
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"],
@@ -31,19 +45,23 @@ export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
   const modules = new Map<string, Module>();
   const pending = [...entries];
   const visited = new Set<string>();
+  const warnings: string[] = [];
 
   while (pending.length > 0) {
     const filePath = pending.pop()!;
-    if (visited.has(filePath)) continue;
-    visited.add(filePath);
-
     if (!existsSync(filePath)) continue;
-    const ext = extname(filePath);
-    if (!SOURCE_EXTS.has(ext) && !filePath.endsWith("middleware.ts")) continue;
+    const key = visitedKey(filePath);
+    if (visited.has(key)) continue;
+    visited.add(key);
+
+    if (!SOURCE_EXTS.has(extname(filePath))) continue;
 
     const source = readFileSync(filePath, "utf-8");
     const parsed = parseSync(filePath, source, { sourceType: "module" });
-    const lines = source.split("\n");
+    for (const err of parsed.errors ?? []) {
+      warnings.push(`${relative(projectRoot, filePath)}: parse error: ${err.message}`);
+    }
+    const lines = source.split(/\r?\n/);
     const directives = extractDirectives(parsed.program);
     const imports = extractImports(
       filePath,
@@ -75,7 +93,7 @@ export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
     modules.set(filePath, mod);
 
     for (const imp of imports) {
-      if (imp.resolvedPath && !visited.has(imp.resolvedPath)) {
+      if (imp.resolvedPath && !visited.has(visitedKey(imp.resolvedPath))) {
         pending.push(imp.resolvedPath);
       }
     }
@@ -97,7 +115,7 @@ export async function buildGraph(projectRoot: string): Promise<ModuleGraph> {
     else serverModules.add(path);
   }
 
-  return { modules, entries, clientModules, serverModules, sharedModules };
+  return { modules, entries, clientModules, serverModules, sharedModules, warnings };
 }
 
 function findEntries(projectRoot: string): string[] {
@@ -140,7 +158,10 @@ function resolveImport(
     if (result.path) return result.path;
     return null;
   }
-  const result = resolver.sync(join(projectRoot, "node_modules", specifier.split("/")[0]), specifier);
+  const result = resolver.sync(
+    join(projectRoot, "node_modules", ...specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1)),
+    specifier,
+  );
   if (result.path) return result.path;
   const nmResult = resolver.sync(projectRoot, specifier);
   return nmResult.path ?? null;
@@ -151,26 +172,19 @@ function extractExports(
   lines: string[],
 ): ExportInfo[] {
   const exports: ExportInfo[] = [];
+  const push = (name: string, node: object, isAsync = false) => {
+    exports.push({ name, loc: locFromSpan(node, lines), referencedBy: [], isAsync });
+  };
   for (const stmt of program.body) {
     if (stmt.type === "ExportNamedDeclaration") {
-      if (stmt.declaration?.type === "FunctionDeclaration" && stmt.declaration.id) {
-        exports.push({
-          name: stmt.declaration.id.name,
-          loc: locFromSpan(stmt.declaration, lines),
-          referencedBy: [],
-          isAsync: stmt.declaration.async ?? false,
-        });
-      }
-      if (stmt.declaration?.type === "VariableDeclaration") {
-        for (const decl of stmt.declaration.declarations) {
-          if (decl.id.type === "Identifier") {
-            exports.push({
-              name: decl.id.name,
-              loc: locFromSpan(decl, lines),
-              referencedBy: [],
-              isAsync: false,
-            });
-          }
+      const decl = stmt.declaration;
+      if (decl?.type === "FunctionDeclaration" && decl.id) {
+        push(decl.id.name, decl, decl.async ?? false);
+      } else if (decl?.type === "ClassDeclaration" && decl.id) {
+        push(decl.id.name, decl);
+      } else if (decl?.type === "VariableDeclaration") {
+        for (const d of decl.declarations) {
+          if (d.id.type === "Identifier") push(d.id.name, d);
         }
       }
       for (const spec of stmt.specifiers ?? []) {
@@ -181,71 +195,16 @@ function extractExports(
               ? String(spec.exported.value)
               : "";
         const local = spec.local?.type === "Identifier" ? spec.local.name : "";
-        exports.push({
-          name: exported || local,
-          loc: locFromSpan(spec, lines),
-          referencedBy: [],
-          isAsync: false,
-        });
+        push(exported || local, spec);
       }
+    } else if (stmt.type === "ExportDefaultDeclaration") {
+      push("default", stmt);
+    } else if (stmt.type === "ExportAllDeclaration") {
+      const name = stmt.exported ? exportedName(toAst(stmt.exported)) : "";
+      push(name || "*", stmt);
     }
-    if (stmt.type === "ExportDefaultDeclaration") {
-      exports.push({
-        name: "default",
-        loc: locFromSpan(stmt, lines),
-        referencedBy: [],
-        isAsync: false,
-      });
-    }
-    if (stmt.type === "FunctionDeclaration" && stmt.id) {
-      exports.push({
-        name: stmt.id.name,
-        loc: locFromSpan(stmt, lines),
-        referencedBy: [],
-        isAsync: stmt.async ?? false,
-      });
-    }
-    if (stmt.type === "VariableDeclaration") {
-      for (const decl of stmt.declarations) {
-        if (decl.id.type === "Identifier") {
-          exports.push({
-            name: decl.id.name,
-            loc: locFromSpan(decl, lines),
-            referencedBy: [],
-            isAsync: false,
-          });
-        }
-      }
-    }
-  }
-  if (sourceHasMetadata(program)) {
-    exports.push({
-      name: "metadata",
-      loc: { line: 1, column: 1 },
-      referencedBy: [],
-      isAsync: false,
-    });
-    exports.push({
-      name: "generateMetadata",
-      loc: { line: 1, column: 1 },
-      referencedBy: [],
-      isAsync: false,
-    });
   }
   return exports;
-}
-
-function sourceHasMetadata(program: ReturnType<typeof parseSync>["program"]): boolean {
-  for (const stmt of program.body) {
-    if (stmt.type === "ExportNamedDeclaration" && stmt.declaration?.type === "VariableDeclaration") {
-      for (const decl of stmt.declaration.declarations) {
-        if (decl.id.type === "Identifier" && (decl.id.name === "metadata" || decl.id.name === "generateMetadata")) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
 }
 
 function buildDependents(modules: Map<string, Module>) {
@@ -259,28 +218,17 @@ function buildDependents(modules: Map<string, Module>) {
 }
 
 function classifyBoundaries(modules: Map<string, Module>, entries: string[]) {
-  const clientReachable = new Set<string>();
-  const queue: string[] = [];
-
+  const seeds: string[] = [];
   for (const [path, mod] of modules) {
-    if (mod.isBoundary || mod.directives.has("client-only")) {
-      clientReachable.add(path);
-      queue.push(path);
-    }
+    if (mod.isBoundary || mod.directives.has("client-only")) seeds.push(path);
   }
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const mod = modules.get(current);
-    if (!mod) continue;
+  const clientReachable = bfsReach(seeds, function* (path) {
+    const mod = modules.get(path);
+    if (!mod) return;
     for (const imp of mod.imports) {
-      if (imp.isDynamic) continue;
-      if (imp.resolvedPath && !clientReachable.has(imp.resolvedPath)) {
-        clientReachable.add(imp.resolvedPath);
-        queue.push(imp.resolvedPath);
-      }
+      if (!imp.isDynamic && imp.resolvedPath) yield imp.resolvedPath;
     }
-  }
+  });
 
   const entrySet = new Set(entries);
   for (const [path, mod] of modules) {
@@ -305,45 +253,121 @@ function isAppRoute(filePath: string): boolean {
 }
 
 function computeSubtreeBytes(modules: Map<string, Module>) {
-  for (const mod of modules.values()) {
-    const visited = new Set<string>();
-    const stack = [mod.filePath];
-    let total = 0;
-    while (stack.length > 0) {
-      const p = stack.pop()!;
-      if (visited.has(p)) continue;
-      visited.add(p);
-      const m = modules.get(p);
-      if (!m) continue;
-      total += m.sourceBytes;
-      for (const imp of m.imports) {
-        if (imp.resolvedPath) stack.push(imp.resolvedPath);
+  // Static edges only (skip dynamic / type-only), consistent with forest/builder.ts.
+  const paths = [...modules.keys()];
+  const n = paths.length;
+  const index = new Map(paths.map((p, i) => [p, i]));
+  const adj: number[][] = paths.map((p) => {
+    const out: number[] = [];
+    for (const imp of modules.get(p)!.imports) {
+      if (imp.isDynamic || imp.isTypeOnly || !imp.resolvedPath) continue;
+      const t = index.get(imp.resolvedPath);
+      if (t !== undefined) out.push(t);
+    }
+    return out;
+  });
+
+  // Iterative Tarjan SCC; components are emitted dependencies-first.
+  const idx = new Int32Array(n).fill(-1);
+  const low = new Int32Array(n);
+  const onStack = new Uint8Array(n);
+  const comp = new Int32Array(n).fill(-1);
+  const sccs: number[][] = [];
+  const stack: number[] = [];
+  let counter = 0;
+  for (let root = 0; root < n; root++) {
+    if (idx[root] !== -1) continue;
+    const work: [number, number][] = [[root, 0]];
+    idx[root] = low[root] = counter++;
+    stack.push(root);
+    onStack[root] = 1;
+    while (work.length > 0) {
+      const frame = work[work.length - 1]!;
+      const v = frame[0];
+      if (frame[1] < adj[v]!.length) {
+        const w = adj[v]![frame[1]++]!;
+        if (idx[w] === -1) {
+          idx[w] = low[w] = counter++;
+          stack.push(w);
+          onStack[w] = 1;
+          work.push([w, 0]);
+        } else if (onStack[w]) {
+          low[v] = Math.min(low[v]!, idx[w]!);
+        }
+      } else {
+        work.pop();
+        if (work.length > 0) {
+          const parent = work[work.length - 1]![0];
+          low[parent] = Math.min(low[parent]!, low[v]!);
+        }
+        if (low[v] === idx[v]) {
+          const members: number[] = [];
+          let w: number;
+          do {
+            w = stack.pop()!;
+            onStack[w] = 0;
+            comp[w] = sccs.length;
+            members.push(w);
+          } while (w !== v);
+          sccs.push(members);
+        }
       }
     }
-    mod.subtreeBytes = total;
+  }
+
+  // Reachability bitset per SCC (exact, handles diamonds without double counting).
+  const words = (n + 31) >>> 5;
+  const bits: Uint32Array[] = [];
+  const bytesOf = paths.map((p) => modules.get(p)!.sourceBytes);
+  for (let c = 0; c < sccs.length; c++) {
+    const set = new Uint32Array(words);
+    for (const v of sccs[c]!) {
+      set[v >>> 5]! |= 1 << (v & 31);
+      for (const w of adj[v]!) {
+        const cw = comp[w]!;
+        if (cw === c) continue;
+        const other = bits[cw]!;
+        for (let k = 0; k < words; k++) set[k]! |= other[k]!;
+      }
+    }
+    bits.push(set);
+    let total = 0;
+    for (let k = 0; k < words; k++) {
+      let word = set[k]!;
+      while (word !== 0) {
+        const low1 = word & -word;
+        total += bytesOf[(k << 5) + (31 - Math.clz32(low1))]!;
+        word ^= low1;
+      }
+    }
+    for (const v of sccs[c]!) modules.get(paths[v]!)!.subtreeBytes = total;
   }
 }
 
 function computeImportChains(modules: Map<string, Module>, entries: string[]) {
-  for (const mod of modules.values()) {
-    const visited = new Set<string>();
-    const queue: { path: string; chain: string[] }[] = entries.map((e) => ({ path: e, chain: [e] }));
-    while (queue.length > 0) {
-      const { path, chain } = queue.shift()!;
-      if (path === mod.filePath) {
-        mod.importChainFromEntry = chain;
-        break;
-      }
-      if (visited.has(path)) continue;
-      visited.add(path);
-      const m = modules.get(path);
-      if (!m) continue;
-      for (const imp of m.imports) {
-        if (imp.resolvedPath) {
-          queue.push({ path: imp.resolvedPath, chain: [...chain, imp.resolvedPath] });
-        }
-      }
+  // Single multi-source BFS with parent pointers; chains are rebuilt by walking parents.
+  const parent = new Map<string, string | null>();
+  const queue: string[] = [];
+  for (const e of entries) {
+    if (modules.has(e) && !parent.has(e)) {
+      parent.set(e, null);
+      queue.push(e);
     }
+  }
+  for (let head = 0; head < queue.length; head++) {
+    const path = queue[head]!;
+    for (const imp of modules.get(path)!.imports) {
+      const next = imp.resolvedPath;
+      if (!next || parent.has(next) || !modules.has(next)) continue;
+      parent.set(next, path);
+      queue.push(next);
+    }
+  }
+  for (const mod of modules.values()) {
+    if (!parent.has(mod.filePath)) continue;
+    const chain: string[] = [];
+    for (let p: string | null | undefined = mod.filePath; p != null; p = parent.get(p)) chain.push(p);
+    mod.importChainFromEntry = chain.reverse();
   }
 }
 
@@ -352,9 +376,10 @@ function trackExportReferences(modules: Map<string, Module>) {
     for (const imp of mod.imports) {
       if (!imp.resolvedPath || !modules.has(imp.resolvedPath)) continue;
       const target = modules.get(imp.resolvedPath)!;
-      for (const sym of imp.namedSymbols) {
-        const exp = target.exports.find((e) => e.name === sym || sym === "*");
-        if (exp) {
+      const wanted = new Set(imp.namedSymbols);
+      const all = wanted.has("*");
+      for (const exp of target.exports) {
+        if (all || wanted.has(exp.name)) {
           exp.referencedBy.push({ modulePath: mod.filePath, symbols: imp.namedSymbols });
         }
       }

@@ -1,6 +1,8 @@
-import type { Rule } from "../../types.js";
+import type { Module, Rule, RuleContext } from "../../types.js";
 import { isProjectSource, reportFinding, isIgnored } from "../helpers.js";
 import { relPath } from "../../graph/builder.js";
+
+const MIN_ROUTE_SUBTREE_BYTES = 2048;
 
 export const useClientTooHigh: Rule = {
   id: "use-client-too-high",
@@ -12,12 +14,13 @@ export const useClientTooHigh: Rule = {
       if (!isProjectSource(ctx, mod.filePath)) continue;
       if (!mod.isBoundary) continue;
       if (isIgnored(ctx, "use-client-too-high", mod.filePath)) continue;
+      const isRouteFile = /\/(layout|page|template)\.(t|j)sx?$/.test(mod.filePath);
       const isHighFile =
-        /\/(layout|page|template)\.(t|j)sx?$/.test(mod.filePath) ||
+        (isRouteFile && mod.subtreeBytes >= MIN_ROUTE_SUBTREE_BYTES) ||
         mod.subtreeBytes > subtreeBytesHigh;
       if (!isHighFile) continue;
 
-      const subtree = collectSubtree(ctx, mod.filePath);
+      const subtree = collectSubtree(ctx, mod.filePath).filter((m) => isProjectSource(ctx, m.filePath));
       const withSignals = subtree.filter(
         (m) => m.signals.hooks.length + m.signals.eventHandlers.length + m.signals.browserGlobals.length > 0,
       );
@@ -50,10 +53,10 @@ export const useClientTooHigh: Rule = {
   },
 };
 
-function collectSubtree(ctx: { graph: { modules: Map<string, { filePath: string; imports: { resolvedPath: string | null }[]; signals: { hooks: unknown[]; eventHandlers: unknown[]; browserGlobals: unknown[] } }> } }, root: string) {
+function collectSubtree(ctx: RuleContext, root: string): Module[] {
   const visited = new Set<string>();
   const stack = [root];
-  const result = [];
+  const result: Module[] = [];
   while (stack.length) {
     const p = stack.pop()!;
     if (visited.has(p)) continue;
@@ -62,6 +65,7 @@ function collectSubtree(ctx: { graph: { modules: Map<string, { filePath: string;
     if (!m) continue;
     result.push(m);
     for (const imp of m.imports) {
+      if (imp.isDynamic) continue;
       if (imp.resolvedPath) stack.push(imp.resolvedPath);
     }
   }

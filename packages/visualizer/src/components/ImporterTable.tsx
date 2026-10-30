@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ImporterRow } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
 import { DepInfoBadges, ImporterInfoBadges } from "./Badges";
@@ -11,6 +11,9 @@ interface Props {
 
 export function ImporterTable({ rows }: Props) {
   const [open, setOpen] = useState<string | null>(rows[0]?.path ?? null);
+  useEffect(() => {
+    setOpen(rows[0]?.path ?? null);
+  }, [rows]);
 
   if (rows.length === 0) {
     return <p className="empty">No matching files for this filter.</p>;

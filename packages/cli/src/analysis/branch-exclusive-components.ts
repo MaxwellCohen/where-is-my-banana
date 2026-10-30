@@ -34,6 +34,17 @@ export function analyzeBranchExclusiveComponents(
         candidates,
       );
     }
+    if (node.type === "LogicalExpression" && node.operator === "&&") {
+      collectFromConditional(
+        node.left as AstNode,
+        node.right as AstNode,
+        null,
+        pathRoots,
+        program,
+        lines,
+        candidates,
+      );
+    }
     if (node.type === "ConditionalExpression") {
       collectFromConditional(
         node.test as AstNode,
@@ -135,7 +146,11 @@ function collectUnconditionalComponents(program: Program, lines: string[]): Set<
 
 function isUnderConditionalBranch(ancestors: AstNode[]): boolean {
   for (const anc of ancestors) {
-    if (anc.type === "IfStatement" || anc.type === "ConditionalExpression") {
+    if (
+      anc.type === "IfStatement" ||
+      anc.type === "ConditionalExpression" ||
+      (anc.type === "LogicalExpression" && anc.operator === "&&")
+    ) {
       return true;
     }
   }
@@ -216,14 +231,6 @@ function collectPathRoots(program: Program): Set<string> {
         }
       }
     }
-    if (node.type === "CallExpression") {
-      const callee = node.callee as AstNode;
-      if (callee.type === "Identifier" && callee.name === "usePathname") {
-        const parent = node as AstNode;
-        // usePathname() assignment handled via VariableDeclarator init
-        void parent;
-      }
-    }
   });
 
   // Second pass: track assignments from known path roots
@@ -301,17 +308,23 @@ function stringLiteralRoute(node: AstNode): string | null {
   return null;
 }
 
+const declaratorInitCache = new WeakMap<Program, Map<string, AstNode | null>>();
+
 function findDeclaratorInit(program: Program, name: string): AstNode | null {
-  let init: AstNode | null = null;
-  walk(toAst(program), (node) => {
-    if (init) return;
-    if (node.type !== "VariableDeclarator") return;
-    const id = node.id as AstNode;
-    if (id.type === "Identifier" && id.name === name) {
-      init = (node.init as AstNode) ?? null;
-    }
-  });
-  return init;
+  let inits = declaratorInitCache.get(program);
+  if (!inits) {
+    inits = new Map();
+    const map = inits;
+    walk(toAst(program), (node) => {
+      if (node.type !== "VariableDeclarator") return;
+      const id = node.id as AstNode;
+      if (id.type === "Identifier" && !map.has(id.name as string)) {
+        map.set(id.name as string, (node.init as AstNode) ?? null);
+      }
+    });
+    declaratorInitCache.set(program, map);
+  }
+  return inits.get(name) ?? null;
 }
 
 function buildImportedSymbolSet(imports: Import[]): Set<string> {
@@ -343,17 +356,19 @@ function walkWithAncestors(
   ancestors: AstNode[] = [],
 ): void {
   visitor(node, ancestors);
+  ancestors.push(node);
   for (const key of Object.keys(node)) {
     const val = node[key];
     if (!val || typeof val !== "object") continue;
     if (Array.isArray(val)) {
       for (const child of val) {
         if (child && typeof child === "object" && "type" in child) {
-          walkWithAncestors(child as AstNode, visitor, [...ancestors, node]);
+          walkWithAncestors(child as AstNode, visitor, ancestors);
         }
       }
     } else if ("type" in val) {
-      walkWithAncestors(val as AstNode, visitor, [...ancestors, node]);
+      walkWithAncestors(val as AstNode, visitor, ancestors);
     }
   }
+  ancestors.pop();
 }

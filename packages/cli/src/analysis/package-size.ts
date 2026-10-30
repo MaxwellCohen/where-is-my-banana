@@ -10,7 +10,10 @@ interface CacheEntry {
   measuredAt: string;
 }
 
+const CACHE_VERSION = 2;
+
 interface SizeCache {
+  schemaVersion: number;
   packages: Record<string, CacheEntry>;
 }
 
@@ -42,19 +45,21 @@ export async function measureClientPackageSizes(
     const version = resolveInstalledVersion(projectRoot, name) ?? pkg.dependencies[name] ?? "unknown";
     const cacheKey = `${name}@${version}`;
     const cached = cache.packages[cacheKey];
-    if (cached) {
+    if (cached && typeof cached.bytes === "number" && cached.bytes > 0) {
       pkg.installSizes.set(name, cached.bytes);
       continue;
     }
 
     const bytes = measurePackageDir(projectRoot, name);
     pkg.installSizes.set(name, bytes);
-    cache.packages[cacheKey] = {
-      version,
-      bytes,
-      measuredAt: new Date().toISOString(),
-    };
-    dirty = true;
+    if (bytes > 0) {
+      cache.packages[cacheKey] = {
+        version,
+        bytes,
+        measuredAt: new Date().toISOString(),
+      };
+      dirty = true;
+    }
   }
 
   if (dirty) saveCache(projectRoot, cache);
@@ -94,7 +99,11 @@ function du(dir: string): number {
       if (entry.isDirectory()) {
         if (entry.name === "node_modules" || entry.name === ".git") continue;
         total += du(path);
-      } else if (/\.(js|mjs|cjs|jsx|ts|tsx|json|wasm|css)$/i.test(entry.name)) {
+      } else if (
+        /\.(js|mjs|cjs|jsx|ts|tsx|json|wasm|css)$/i.test(entry.name) &&
+        !/\.d\.[cm]?ts$/i.test(entry.name) &&
+        !/\.map$/i.test(entry.name)
+      ) {
         total += statSync(path).size;
       }
     }
@@ -126,13 +135,27 @@ function cachePath(projectRoot: string): string {
   return join(resolveOutputDir(projectRoot), "cache.json");
 }
 
+function emptyCache(): SizeCache {
+  return { schemaVersion: CACHE_VERSION, packages: {} };
+}
+
 function loadCache(projectRoot: string): SizeCache {
   const path = cachePath(projectRoot);
-  if (!existsSync(path)) return { packages: {} };
+  if (!existsSync(path)) return emptyCache();
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as SizeCache;
+    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<SizeCache> | null;
+    if (
+      !parsed ||
+      parsed.schemaVersion !== CACHE_VERSION ||
+      !parsed.packages ||
+      typeof parsed.packages !== "object" ||
+      Array.isArray(parsed.packages)
+    ) {
+      return emptyCache();
+    }
+    return parsed as SizeCache;
   } catch {
-    return { packages: {} };
+    return emptyCache();
   }
 }
 

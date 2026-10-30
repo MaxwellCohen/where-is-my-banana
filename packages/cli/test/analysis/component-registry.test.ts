@@ -81,3 +81,14 @@ export const Components = {
     expect(results[0]?.componentEntryCount).toBe(4);
   });
 });
+
+describe("analyzeComponentRegistries import matching", () => {
+  it("ignores lowercase identifier entries and handles namespace imports", () => {
+    const source = `import * as UI from './ui';
+const helper = 1;
+export const Map1 = { a: helper, B: UI };`;
+    const [r] = analyze(source, [staticImport("*", "./ui")]);
+    expect(r?.componentEntryCount).toBe(1);
+    expect(r?.importedComponentCount).toBe(1);
+  });
+});

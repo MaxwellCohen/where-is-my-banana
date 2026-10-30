@@ -53,6 +53,8 @@ The GitHub command runs the orphan `npx` branch, which must be rebuilt after cha
 pnpm install && pnpm pack:npx:push   # rebuilds and force-pushes origin/npx
 ```
 
+Pushing to a non-default remote (`WIMB_NPX_REMOTE`) additionally requires `--force-remote`.
+
 ## Sample output
 
 | # | Fix | Safety | Edge (importer -> imported) | Saves | Routes |
@@ -87,9 +89,9 @@ npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . \
 
 ## Other commands
 
-- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--min-bytes`, `--top N`, `--json`, `--compare`.
-- `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`).
-- `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`.
+- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`. Invalid flag values exit 2.
+- `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
+- `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
 
 ## Config
 

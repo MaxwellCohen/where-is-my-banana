@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { formatBytes } from "@/lib/format";
+import { buttonProps } from "@/lib/a11y";
+import { isVendor, sortedChildren } from "@/lib/tree-utils";
 import type { RouteSummary, TreeNode } from "@/lib/types";
 
 const MAX_DEPTH = 4;
@@ -22,10 +24,6 @@ interface Placed {
   parent?: Placed;
   imports: number;
   modules: number;
-}
-
-function isVendor(n: TreeNode) {
-  return Boolean(n.path?.includes("node_modules/"));
 }
 
 function countModules(n: TreeNode): number {
@@ -54,9 +52,8 @@ function build(roots: TreeNode[]) {
       const kids =
         depth >= MAX_DEPTH
           ? []
-          : [...node.children]
+          : sortedChildren(node)
               .filter((c) => c.totalBytes / total >= MIN_FRACTION)
-              .sort((a, b) => b.totalBytes - a.totalBytes)
               .slice(0, MAX_KIDS);
       if (!kids.length) p.x = leaf++ * SLOT;
       else {
@@ -89,11 +86,12 @@ export function RouteGraph({
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   const sorted = useMemo(() => [...routes].sort((a, b) => b.totalBytes - a.totalBytes), [routes]);
-  const shown = sorted.filter(
-    (r) => !hidden.has(r.route) && r.route.toLowerCase().includes(query.trim().toLowerCase()),
-  );
-  const roots = shown.map((r) => trees[r.route]).filter((t): t is TreeNode => Boolean(t));
-  const { all, width, height } = useMemo(() => build(roots), [roots]);
+  const { all, width, height, roots } = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const shown = sorted.filter((r) => !hidden.has(r.route) && r.route.toLowerCase().includes(q));
+    const roots = shown.map((r) => trees[r.route]).filter((t): t is TreeNode => Boolean(t));
+    return { ...build(roots), roots };
+  }, [sorted, hidden, query, trees]);
 
   function toggle(route: string) {
     setHidden((prev) => {
@@ -147,8 +145,8 @@ export function RouteGraph({
             className="chart"
             viewBox={`0 0 ${width} ${height}`}
             style={{ maxWidth: width, margin: "0 auto" }}
-            role="img"
-            aria-label="Pages and their imports"
+            role="group"
+            aria-label={`Pages and their imports: ${roots.length} pages, ${all.length} nodes`}
           >
             {all
               .filter((o) => o.parent)
@@ -174,8 +172,9 @@ export function RouteGraph({
               return (
                 <g
                   key={`o:${node.id}:${x}:${y}`}
-                  onClick={() => depth === 0 && onSelect(node.id)}
-                  style={depth === 0 ? undefined : { cursor: "default" }}
+                  {...(depth === 0
+                    ? { ...buttonProps(`Select page ${node.label}, ${formatBytes(node.totalBytes)}`, () => onSelect(node.id)), "aria-pressed": active }
+                    : { style: { cursor: "default" } })}
                 >
                   <circle
                     cx={x}

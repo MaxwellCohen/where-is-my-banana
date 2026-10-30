@@ -1,5 +1,5 @@
-import type { Rule, RuleContext } from "../../types.js";
-import { reportFinding, projectClientModulePaths, isIgnored, isFrameworkPackage } from "../helpers.js";
+import type { Module, Rule, RuleContext } from "../../types.js";
+import { reportFinding, isProjectSource, isIgnored, isFrameworkPackage } from "../helpers.js";
 import { relPath } from "../../graph/builder.js";
 
 export const transitiveHeavyDependency: Rule = {
@@ -8,36 +8,30 @@ export const transitiveHeavyDependency: Rule = {
   defaultSeverity: "warning",
   run(ctx) {
     const { heavyPackageBytes } = ctx.config.thresholds;
-    const directImports = new Set<string>();
-    for (const path of projectClientModulePaths(ctx)) {
-      const mod = ctx.graph.modules.get(path)!;
-      for (const imp of mod.imports) {
-        if (imp.packageName) directImports.add(imp.packageName);
-      }
-    }
+    const transitive = collectTransitiveImporters(ctx);
 
     for (const [pkg, size] of ctx.pkg.installSizes) {
       if (isFrameworkPackage(ctx, pkg)) continue;
       const isHeavy = size > heavyPackageBytes || ctx.data.heavyPackages.has(pkg);
       if (!isHeavy) continue;
-      const inClient = [...ctx.graph.clientModules].some((p) => {
-        const mod = ctx.graph.modules.get(p)!;
-        return mod.imports.some((i) => i.packageName === pkg);
-      });
-      if (!inClient) continue;
-      if (directImports.has(pkg)) continue;
+      const importer = transitive.get(pkg);
+      if (!importer) continue;
       if (isIgnored(ctx, "transitive-heavy-dependency", pkg)) continue;
 
-      const chain = findChain(ctx, pkg);
+      const chain = importer.importChainFromEntry;
       reportFinding(ctx, {
           id: `pkg:${pkg}:transitive-heavy-dependency`,
           ruleId: "transitive-heavy-dependency",
           category: "dependency",
           defaultSeverity: "warning",
           confidence: "medium",
-          file: chain[0] ?? pkg,
+          file: chain[0] ?? importer.filePath,
           message: `Heavy package '${pkg}' reached transitively in client graph`,
-          evidence: { package: pkg, chain: chain.map((p) => relPath(ctx.projectRoot, p)) },
+          evidence: {
+            package: pkg,
+            via: relPath(ctx.projectRoot, importer.filePath),
+            chain: chain.map((p) => relPath(ctx.projectRoot, p)),
+          },
           estimatedBytes: size,
           fixStrategy: {
             name: "fix-transitive",
@@ -51,11 +45,26 @@ export const transitiveHeavyDependency: Rule = {
   },
 };
 
-function findChain(ctx: RuleContext, pkg: string): string[] {
-  for (const path of projectClientModulePaths(ctx)) {
-    const mod = ctx.graph.modules.get(path)!;
-    const imp = mod.imports.find((i) => i.packageName === pkg);
-    if (imp) return [mod.filePath];
+/** For each package, the shortest-chain client node_modules module (outside that package) that imports it. */
+function collectTransitiveImporters(ctx: RuleContext): Map<string, Module> {
+  const result = new Map<string, Module>();
+  for (const path of ctx.graph.clientModules) {
+    if (isProjectSource(ctx, path)) continue;
+    const mod = ctx.graph.modules.get(path);
+    if (!mod) continue;
+    for (const imp of mod.imports) {
+      if (!imp.packageName) continue;
+      if (mod.filePath.includes(`/node_modules/${imp.packageName}/`)) continue;
+      const prev = result.get(imp.packageName);
+      if (
+        !prev ||
+        mod.importChainFromEntry.length < prev.importChainFromEntry.length ||
+        (mod.importChainFromEntry.length === prev.importChainFromEntry.length &&
+          mod.filePath < prev.filePath)
+      ) {
+        result.set(imp.packageName, mod);
+      }
+    }
   }
-  return [];
+  return result;
 }

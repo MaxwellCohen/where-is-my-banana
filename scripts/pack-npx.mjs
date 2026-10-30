@@ -5,6 +5,8 @@
  * Usage:
  *   node scripts/pack-npx.mjs           # build .npm-pack + wimb-cli-*.tgz
  *   node scripts/pack-npx.mjs --push    # also force-push orphan branch `npx`
+ *   WIMB_NPX_REMOTE=<url> node scripts/pack-npx.mjs --push --force-remote
+ *                                       # required to push to a non-default remote
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -68,28 +70,33 @@ if (!shouldPush) {
   process.exit(0);
 }
 
+const DEFAULT_REMOTE = "https://github.com/MaxwellCohen/where-is-my-banana.git";
+const remote = process.env.WIMB_NPX_REMOTE ?? DEFAULT_REMOTE;
+if (remote !== DEFAULT_REMOTE && !process.argv.includes("--force-remote")) {
+  console.error(`Refusing to force-push to non-default remote ${remote}. Pass --force-remote to confirm.`);
+  process.exit(1);
+}
+
 const work = mkdtempSync(join(tmpdir(), "wimb-npx-"));
-cpSync(outDir, work, { recursive: true });
-const git = (args) =>
-  execFileSync("git", args, { cwd: work, encoding: "utf8" });
+try {
+  cpSync(outDir, work, { recursive: true });
+  const git = (args) =>
+    execFileSync("git", args, { cwd: work, encoding: "utf8" });
 
-git(["init"]);
-git(["checkout", "-b", "npx"]);
-git(["add", "-A"]);
-git([
-  "commit",
-  "-m",
-  `chore: publish @wimb/cli ${publishable.version} for npx`,
-]);
-execFileSync(
-  "git",
-  [
-    "push",
-    "--force",
-    process.env.WIMB_NPX_REMOTE ?? "https://github.com/MaxwellCohen/where-is-my-banana.git",
-    "npx:npx",
-  ],
-  { cwd: work, stdio: "inherit" },
-);
+  git(["init"]);
+  git(["checkout", "-b", "npx"]);
+  git(["add", "-A"]);
+  git([
+    "commit",
+    "-m",
+    `chore: publish @wimb/cli ${publishable.version} for npx`,
+  ]);
+  execFileSync("git", ["push", "--force", remote, "npx:npx"], {
+    cwd: work,
+    stdio: "inherit",
+  });
 
-console.log("\nPushed orphan branch npx → origin/npx");
+  console.log("\nPushed orphan branch npx → origin/npx");
+} finally {
+  rmSync(work, { recursive: true, force: true });
+}

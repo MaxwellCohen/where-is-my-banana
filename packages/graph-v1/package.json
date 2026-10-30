@@ -5,24 +5,27 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./parse-file": {
-      "types": "./src/parse-file.ts",
+      "types": "./dist/parse-file.d.ts",
       "import": "./dist/parse-file.js",
       "default": "./dist/parse-file.js"
     }
   },
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && tsc -p tsconfig.json --emitDeclarationOnly --declaration --outDir dist",
     "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest"

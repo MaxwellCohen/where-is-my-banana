@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { rankImporters } from "@/lib/importers";
 import { loadGraphFromFile } from "@/lib/load-graph";
 import type { BundleSide, VizGraph, VizSide } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
-import { TreeNodeRow } from "./TreeNodeRow";
+import { TreeNodeRow, collectHitAncestors } from "./TreeNodeRow";
 import { ImporterTable } from "./ImporterTable";
 import { CopyPromptButton } from "./CopyPromptButton";
 import { WinsPanel } from "./WinsPanel";
@@ -15,6 +15,7 @@ import { SunburstView } from "./charts/SunburstView";
 import { RouteGraph } from "./charts/RouteGraph";
 import { RoutesChart } from "./charts/RoutesChart";
 import { findNode } from "@/lib/viz-layout";
+import { walkTree } from "@/lib/tree-utils";
 import {
   firstLoadBytes,
   loadWinsFromFile,
@@ -55,6 +56,9 @@ export function VisualizerApp() {
   const [onlyWins, setOnlyWins] = useState(false);
   const [zoomId, setZoomId] = useState<string | null>(null);
 
+  const uploadId = useRef(0);
+  const winsId = useRef(0);
+
   const bundle = useMemo(
     () => (graph ? sideBundle(graph, side) : { routes: [], trees: {} }),
     [graph, side],
@@ -80,7 +84,7 @@ export function VisualizerApp() {
     for (const route of bundle.routes) {
       const root = bundle.trees[route.route];
       if (!root) continue;
-      walk(root, (n) => {
+      walkTree(root, (n) => {
         if (n.kind !== "module" || !n.path || n.routeCount < 2) return;
         const prev = scores.get(n.path);
         if (!prev || n.selfBytes > prev.maxBytes) {
@@ -114,36 +118,56 @@ export function VisualizerApp() {
 
   async function onUpload(file: File | null) {
     if (!file) return;
+    const id = ++uploadId.current;
     setBusy(true);
     setError(null);
     try {
       const next = await loadGraphFromFile(file);
+      if (id !== uploadId.current) return;
       setGraph(next);
+      setZoomId(null);
+      setWinId(null);
+      setWins(null);
       setSelected(sideBundle(next, side).routes[0]?.route ?? "/");
     } catch (err) {
+      if (id !== uploadId.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      if (id === uploadId.current) setBusy(false);
     }
   }
 
   async function onWins(file: File | null) {
     if (!file) return;
+    const id = ++winsId.current;
     setError(null);
     try {
-      setWins(await loadWinsFromFile(file));
+      const next = await loadWinsFromFile(file);
+      if (id !== winsId.current) return;
+      setWins(next);
       setWinId(null);
     } catch (err) {
+      if (id !== winsId.current) return;
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  const routeWins = winsForRoute(wins, selected);
-  const sortedWins = [...routeWins].sort((a, b) => b.totalSavedBytes - a.totalSavedBytes);
+  const routeWins = useMemo(() => winsForRoute(wins, selected), [wins, selected]);
+  const sortedWins = useMemo(
+    () => [...routeWins].sort((a, b) => b.totalSavedBytes - a.totalSavedBytes),
+    [routeWins],
+  );
   const activeWin = wins?.wins.find((w) => w.id === winId) ?? null;
-  const hl = activeWin ? { target: activeWin.edge.imported, chain: activeWin.chain } : null;
-  const visibleRoutes =
-    wins && onlyWins ? bundle.routes.filter((r) => winsForRoute(wins, r.route).length > 0) : bundle.routes;
+  const hl = useMemo(
+    () => (activeWin ? { target: activeWin.edge.imported, chain: activeWin.chain } : null),
+    [activeWin],
+  );
+  const hits = useMemo(() => (tree ? collectHitAncestors(tree, hl) : undefined), [tree, hl]);
+  const visibleRoutes = useMemo(
+    () =>
+      wins && onlyWins ? bundle.routes.filter((r) => winsForRoute(wins, r.route).length > 0) : bundle.routes,
+    [wins, onlyWins, bundle],
+  );
   const flBytes = firstLoadBytes(wins, selected);
   const saveBytes = safeSavings(wins, selected);
 
@@ -166,7 +190,11 @@ export function VisualizerApp() {
               type="file"
               accept=".jsonl,.gz,.json,.jsonl.gz"
               disabled={busy}
-              onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const input = e.currentTarget;
+                void onUpload(input.files?.[0] ?? null);
+                input.value = "";
+              }}
             />
           </label>
           <label className="upload-btn">
@@ -174,7 +202,11 @@ export function VisualizerApp() {
             <input
               type="file"
               accept=".json"
-              onChange={(e) => void onWins(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const input = e.currentTarget;
+                void onWins(input.files?.[0] ?? null);
+                input.value = "";
+              }}
             />
           </label>
           <span className="meta">
@@ -184,7 +216,7 @@ export function VisualizerApp() {
           </span>
         </div>
         <p className="privacy">Nothing is uploaded or stored on the server. Graphs never leave your device.</p>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <p className="error" role="alert">{error}</p> : null}
 
         {graph ? (
           <div className="toolbar">
@@ -192,6 +224,7 @@ export function VisualizerApp() {
               <button
                 type="button"
                 className={side === "client" ? "active" : undefined}
+                aria-pressed={side === "client"}
                 onClick={() => switchSide("client")}
               >
                 Client
@@ -199,6 +232,7 @@ export function VisualizerApp() {
               <button
                 type="button"
                 className={side === "server" ? "active" : undefined}
+                aria-pressed={side === "server"}
                 onClick={() => switchSide("server")}
                 disabled={!hasServer && graph.schemaVersion === 1}
                 title={
@@ -216,6 +250,7 @@ export function VisualizerApp() {
                   key={v.id}
                   type="button"
                   className={view === v.id ? "active" : undefined}
+                  aria-pressed={view === v.id}
                   onClick={() => setView(v.id)}
                 >
                   {v.label}
@@ -261,6 +296,7 @@ export function VisualizerApp() {
                   <button
                     type="button"
                     className={r.route === selected ? "active" : undefined}
+                    aria-current={r.route === selected ? "true" : undefined}
                     onClick={() => selectRoute(r.route)}
                   >
                     <span className="route-name">{r.route}</span>
@@ -358,7 +394,7 @@ export function VisualizerApp() {
                 </div>
                 {tree ? (
                   <ul className="forest">
-                    <TreeNodeRow node={tree} depth={0} routeTotal={routeTotal || 1} hl={hl} />
+                    <TreeNodeRow node={tree} depth={0} routeTotal={routeTotal || 1} hl={hl} hits={hits} />
                   </ul>
                 ) : (
                   <p className="empty">No tree for this route on the {side} side.</p>
@@ -370,18 +406,4 @@ export function VisualizerApp() {
       )}
     </div>
   );
-}
-
-function walk(node: TreeNodeLike, visit: (n: TreeNodeLike) => void): void {
-  visit(node);
-  for (const child of node.children) walk(child, visit);
-}
-
-interface TreeNodeLike {
-  kind: string;
-  label: string;
-  path?: string;
-  selfBytes: number;
-  routeCount: number;
-  children: TreeNodeLike[];
 }

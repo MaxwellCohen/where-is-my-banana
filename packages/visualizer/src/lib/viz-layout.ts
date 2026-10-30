@@ -1,4 +1,5 @@
 import type { TreeNode } from "./types";
+import { isVendor, sortedChildren } from "./tree-utils";
 
 export interface Placed {
   node: TreeNode;
@@ -19,9 +20,7 @@ export interface Arc {
 const MIN_FRACTION = 0.004;
 
 function visibleChildren(node: TreeNode, rootTotal: number): TreeNode[] {
-  return node.children
-    .filter((c) => c.totalBytes / rootTotal >= MIN_FRACTION)
-    .sort((a, b) => b.totalBytes - a.totalBytes);
+  return sortedChildren(node).filter((c) => c.totalBytes / rootTotal >= MIN_FRACTION);
 }
 
 /** Stable hue per top-level package/folder so related modules share a colour. */
@@ -31,7 +30,7 @@ export function nodeColor(node: TreeNode): string {
     : (node.path ?? node.label).split("/").slice(0, 2).join("/");
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  const vendor = node.path?.includes("node_modules/");
+  const vendor = isVendor(node);
   return `hsl(${h % 360} ${vendor ? 38 : 55}% ${vendor ? 38 : 46}%)`;
 }
 
@@ -55,7 +54,7 @@ export function layoutTreemap(root: TreeNode, width: number, height: number, max
   return out;
 }
 
-function squarify(nodes: TreeNode[], rect: { x: number; y: number; w: number; h: number }) {
+export function squarify(nodes: TreeNode[], rect: { x: number; y: number; w: number; h: number }) {
   const sum = nodes.reduce((s, n) => s + n.totalBytes, 0) || 1;
   const scale = (rect.w * rect.h) / sum;
   const items = nodes.map((node) => ({ node, area: node.totalBytes * scale }));
@@ -63,12 +62,12 @@ function squarify(nodes: TreeNode[], rect: { x: number; y: number; w: number; h:
   let { x, y, w, h } = rect;
   let row: typeof items = [];
 
-  const worst = (r: typeof items, side: number) => {
-    const s = r.reduce((a, i) => a + i.area, 0);
-    const max = Math.max(...r.map((i) => i.area));
-    const min = Math.min(...r.map((i) => i.area));
-    return Math.max((side * side * max) / (s * s), (s * s) / (side * side * min));
-  };
+  // Running stats for the current row so each candidate check is O(1).
+  let rs = 0;
+  let rmax = 0;
+  let rmin = Infinity;
+  const worst = (s: number, max: number, min: number, side: number) =>
+    Math.max((side * side * max) / (s * s), (s * s) / (side * side * min));
 
   const flush = () => {
     if (!row.length) return;
@@ -95,12 +94,24 @@ function squarify(nodes: TreeNode[], rect: { x: number; y: number; w: number; h:
       h -= rh;
     }
     row = [];
+    rs = 0;
+    rmax = 0;
+    rmin = Infinity;
   };
 
   for (const item of items) {
     const side = Math.min(w, h);
-    if (row.length && worst([...row, item], side) > worst(row, side)) flush();
+    if (
+      row.length &&
+      worst(rs + item.area, Math.max(rmax, item.area), Math.min(rmin, item.area), side) >
+        worst(rs, rmax, rmin, side)
+    ) {
+      flush();
+    }
     row.push(item);
+    rs += item.area;
+    rmax = Math.max(rmax, item.area);
+    rmin = Math.min(rmin, item.area);
   }
   flush();
   return out;

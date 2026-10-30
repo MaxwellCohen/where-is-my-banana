@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatBytes } from "@/lib/format";
 import { editPrompt, type Win } from "@/lib/wins";
 
@@ -11,16 +11,20 @@ interface Props {
 }
 
 export function WinsPanel({ wins, selectedId, onSelect }: Props) {
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
   async function copy(w: Win) {
+    let ok = true;
     try {
       await navigator.clipboard.writeText(editPrompt(w));
-      setCopied(w.id);
-      setTimeout(() => setCopied((c) => (c === w.id ? null : c)), 1500);
     } catch {
-      /* clipboard unavailable */
+      ok = false;
     }
+    setCopied({ id: w.id, ok });
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(null), 1500);
   }
 
   if (wins.length === 0) return <p className="empty">No wins for this view.</p>;
@@ -51,7 +55,7 @@ export function WinsPanel({ wins, selectedId, onSelect }: Props) {
               {routes.length > 3 ? "…" : ""}
             </div>
             <button type="button" className="win-copy" onClick={() => void copy(w)}>
-              {copied === w.id ? "Copied" : "Copy edit"}
+              {copied?.id === w.id ? (copied.ok ? "Copied" : "Copy failed") : "Copy edit"}
             </button>
             {active ? (
               <ol className="win-chain">

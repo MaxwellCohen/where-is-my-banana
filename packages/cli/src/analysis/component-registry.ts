@@ -27,7 +27,7 @@ export function analyzeComponentRegistries(
   const literalDominanceRatio =
     options.literalDominanceRatio ?? DEFAULT_LITERAL_DOMINANCE_RATIO;
   const lines = source.split("\n");
-  const importedSymbols = buildImportedSymbolMap(program, imports);
+  const importedSymbols = buildImportedSymbolMap(program, imports, lines);
   const localObjects = collectLocalObjectDeclarations(program, lines);
   const exportedNames = collectExportedNames(program);
   const registries: ComponentRegistry[] = [];
@@ -111,7 +111,7 @@ function isLiteralValue(value: AstNode): boolean {
 }
 
 function isComponentEntry(prop: AstNode, value: AstNode): boolean {
-  if (value.type === "Identifier") return true;
+  if (value.type === "Identifier") return /^[A-Z]/.test(value.name as string);
   if (value.type === "ArrowFunctionExpression" || value.type === "FunctionExpression") {
     return containsJsx(value);
   }
@@ -208,22 +208,32 @@ function collectExportedNames(program: Program): Set<string> {
   return names;
 }
 
-function buildImportedSymbolMap(program: Program, imports: Import[]): Map<string, string | null> {
+function buildImportedSymbolMap(
+  program: Program,
+  imports: Import[],
+  lines: string[],
+): Map<string, string | null> {
+  const byKey = new Map<string, Import>();
   const bySpecifier = new Map<string, Import[]>();
   for (const imp of imports) {
     if (imp.isDynamic || imp.isTypeOnly) continue;
+    byKey.set(`${imp.specifier}@${imp.loc.line}:${imp.loc.column}`, imp);
     const list = bySpecifier.get(imp.specifier) ?? [];
     list.push(imp);
     bySpecifier.set(imp.specifier, list);
   }
+  const used = new Set<Import>();
 
   const map = new Map<string, string | null>();
 
   for (const stmt of program.body) {
     if (stmt.type !== "ImportDeclaration") continue;
     const specifier = stmt.source?.value ?? "";
-    const candidates = bySpecifier.get(specifier);
-    const imp = candidates?.shift();
+    const stmtLoc = locFromSpan(stmt, lines);
+    const imp =
+      byKey.get(`${specifier}@${stmtLoc.line}:${stmtLoc.column}`) ??
+      bySpecifier.get(specifier)?.find((c) => !used.has(c));
+    if (imp) used.add(imp);
     const resolvedPath = imp?.resolvedPath ?? null;
 
     for (const spec of stmt.specifiers ?? []) {
@@ -231,6 +241,9 @@ function buildImportedSymbolMap(program: Program, imports: Import[]): Map<string
         map.set(spec.local.name, resolvedPath);
       }
       if (spec.type === "ImportSpecifier" && spec.local?.type === "Identifier") {
+        map.set(spec.local.name, resolvedPath);
+      }
+      if (spec.type === "ImportNamespaceSpecifier" && spec.local?.type === "Identifier") {
         map.set(spec.local.name, resolvedPath);
       }
     }

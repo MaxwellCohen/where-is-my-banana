@@ -267,7 +267,7 @@ function buildEdit(
   replacement: string | undefined,
 ): WinEdit {
   const target = edge.packageName ?? edge.imported;
-  const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare  # rebuild + compare routes: ${routes.join(", ")}`;
+  const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare wins.json  # rebuild + compare routes: ${routes.join(", ")}`;
   const original = u?.found ? u.originalImport : undefined;
   const file = edge.importer;
   const names = u?.bindings.map((b) => b.local).join(", ") ?? "";

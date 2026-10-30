@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { formatBytes } from "@/lib/format";
 import { layoutTreemap, nodeColor } from "@/lib/viz-layout";
+import { buttonProps } from "@/lib/a11y";
 import type { TreeNode } from "@/lib/types";
 
 const W = 1000;
@@ -11,9 +12,12 @@ const H = 560;
 export function TreemapView({ root, onZoom }: { root: TreeNode; onZoom: (n: TreeNode) => void }) {
   const cells = useMemo(() => layoutTreemap(root, W, H), [root]);
   return (
-    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Treemap">
+    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="group" aria-label={`Treemap of ${root.label}, ${formatBytes(root.totalBytes)}, ${cells.length} blocks`}>
       {cells.map(({ node, depth, x, y, w, h }) => (
-        <g key={`${node.id}:${x}:${y}`} onClick={() => node.children.length && onZoom(node)}>
+        <g
+          key={`${node.id}:${x}:${y}`}
+          {...(node.children.length ? buttonProps(`Zoom into ${node.label}, ${formatBytes(node.totalBytes)}`, () => onZoom(node)) : {})}
+        >
           <rect
             x={x}
             y={y}

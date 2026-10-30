@@ -63,7 +63,16 @@ export function parseDataFile<T>(buf: Buffer): ParsedDataFile<T> {
     throw new Error(`invalid analyze JSON length: ${jsonLength}`);
   }
   const jsonStr = new TextDecoder("utf-8").decode(buf.subarray(4, 4 + jsonLength));
-  const header = JSON.parse(jsonStr) as T;
+  let header: T;
+  try {
+    header = JSON.parse(jsonStr) as T;
+  } catch (err) {
+    throw new Error(`invalid analyze header JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (header === null || typeof header !== "object") {
+    throw new Error("invalid analyze header JSON: expected an object");
+  }
+  validateRefs(header);
   const binaryOffset = 4 + jsonLength;
   const binary = new DataView(
     buf.buffer,
@@ -71,6 +80,32 @@ export function parseDataFile<T>(buf: Buffer): ParsedDataFile<T> {
     buf.byteLength - binaryOffset,
   );
   return { header, binary };
+}
+
+const REF_KEYS = [
+  "source_chunk_parts",
+  "source_children",
+  "output_file_chunk_parts",
+  "module_dependencies",
+  "async_module_dependencies",
+];
+
+function validateRefs(header: object): void {
+  const h = header as Record<string, unknown>;
+  for (const key of REF_KEYS) {
+    const ref = h[key];
+    if (ref === undefined || ref === null) continue;
+    const r = ref as Partial<BinaryRef>;
+    if (
+      typeof ref !== "object" ||
+      !Number.isInteger(r.offset) ||
+      !Number.isInteger(r.length) ||
+      r.offset! < 0 ||
+      r.length! < 0
+    ) {
+      throw new Error(`invalid analyze header: ${key} must have non-negative integer offset and length`);
+    }
+  }
 }
 
 export function readEdgesAtIndex(binary: DataView, ref: BinaryRef | undefined, index: number): number[] {
@@ -81,33 +116,54 @@ export function readEdgesAtIndex(binary: DataView, ref: BinaryRef | undefined, i
   if (index < 0 || index >= numOffsets) return [];
 
   const offsetsStart = offset + 4;
-  const prevOffset = index === 0 ? 0 : binary.getUint32(offsetsStart + (index - 1) * 4, false);
-  const edgeCount = binary.getUint32(offsetsStart + index * 4, false) - prevOffset;
+  const dataStart = offsetsStart + 4 * numOffsets;
+  if (dataStart > binary.byteLength) return [];
+
+  // Cumulative offsets must be monotonic non-decreasing up to `index`.
+  let prevOffset = 0;
+  let endOffset = 0;
+  for (let i = 0; i <= index; i++) {
+    const cur = binary.getUint32(offsetsStart + i * 4, false);
+    if (cur < prevOffset) return [];
+    if (i < index) prevOffset = cur;
+    else endOffset = cur;
+  }
+  const maxEdges = Math.floor((binary.byteLength - dataStart) / 4);
+  const edgeCount = Math.min(endOffset, maxEdges) - prevOffset;
   if (edgeCount <= 0) return [];
 
-  const dataStart = offset + 4 + 4 * numOffsets;
   const edges: number[] = [];
   for (let j = 0; j < edgeCount; j++) {
-    const pos = dataStart + (prevOffset + j) * 4;
-    if (pos + 4 > binary.byteLength) break;
-    edges.push(binary.getUint32(pos, false));
+    edges.push(binary.getUint32(dataStart + (prevOffset + j) * 4, false));
   }
   return edges;
 }
 
 export function buildFullPaths(sources: AnalyzeSource[]): string[] {
   const cache = new Map<number, string>();
-  function getFullPath(index: number): string {
-    if (cache.has(index)) return cache.get(index)!;
-    const s = sources[index];
-    if (!s) {
-      cache.set(index, "");
-      return "";
+  function getFullPath(start: number): string {
+    // Walk up the parent chain iteratively; a repeated index means a cycle.
+    const chain: number[] = [];
+    const seen = new Set<number>();
+    let idx: number | null | undefined = start;
+    let base = "";
+    while (idx != null) {
+      const cached = cache.get(idx);
+      if (cached !== undefined) {
+        base = cached;
+        break;
+      }
+      if (seen.has(idx) || !sources[idx]) break;
+      seen.add(idx);
+      chain.push(idx);
+      idx = sources[idx]!.parent_source_index;
     }
-    const p =
-      s.parent_source_index == null ? s.path : getFullPath(s.parent_source_index) + s.path;
-    cache.set(index, p);
-    return p;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      base += sources[chain[i]!]!.path;
+      cache.set(chain[i]!, base);
+    }
+    if (chain.length === 0 && !cache.has(start)) cache.set(start, base);
+    return cache.get(start) ?? base;
   }
   return sources.map((_, i) => getFullPath(i));
 }

@@ -2,11 +2,11 @@
 export function normalizeModulePath(raw: string): string {
   if (!raw) return "";
   return raw
+    .replace(/\\/g, "/")
     .replace(/^\[project\]\//, "")
     .replace(/^\[client-fs\]\//, "")
     .replace(/^\[project\]/, "")
-    .replace(/^\[client-fs\]/, "")
-    .replace(/\\/g, "/");
+    .replace(/^\[client-fs\]/, "");
 }
 
 export function packageNameFromPath(path: string): string | null {

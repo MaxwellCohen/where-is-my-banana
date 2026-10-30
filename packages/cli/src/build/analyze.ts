@@ -10,7 +10,7 @@ import {
   type ModulesHeader,
 } from "./binary-format.js";
 import { createExportAccumulator, parseAnalyzeExportFile } from "./analyze-export.js";
-import { normalizeModulePath, packageNameFromPath } from "./module-path.js";
+import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
 
 export { normalizeModulePath, packageNameFromPath };
 

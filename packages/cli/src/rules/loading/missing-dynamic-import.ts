@@ -1,5 +1,5 @@
 import type { Rule } from "../../types.js";
-import { reportFinding, projectClientModulePaths, isIgnored } from "../helpers.js";
+import { reportFinding, projectClientModulePaths, isIgnored, isViteApp } from "../helpers.js";
 
 export const missingDynamicImport: Rule = {
   id: "missing-dynamic-import",
@@ -7,12 +7,14 @@ export const missingDynamicImport: Rule = {
   defaultSeverity: "error",
   run(ctx) {
     const { dynamicImportMinSubtree } = ctx.config.thresholds;
+    const vite = isViteApp(ctx);
+    const lazyName = vite ? "React.lazy or dynamic import()" : "next/dynamic";
     for (const path of projectClientModulePaths(ctx)) {
+      if (isIgnored(ctx, "missing-dynamic-import", path)) continue;
       const mod = ctx.graph.modules.get(path)!;
       for (const imp of mod.imports) {
         if (!imp.packageName || !ctx.data.heavyComponents.has(imp.packageName)) continue;
-        if (imp.isDynamic) continue;
-        if (isIgnored(ctx, "missing-dynamic-import", path)) continue;
+        if (imp.isDynamic || imp.isTypeOnly) continue;
         reportFinding(ctx, {
             id: `${path}:missing-dynamic-import:${imp.packageName}`,
             ruleId: "missing-dynamic-import",
@@ -21,38 +23,41 @@ export const missingDynamicImport: Rule = {
             confidence: "medium",
             file: path,
             loc: imp.loc,
-            message: `Heavy component '${imp.packageName}' statically imported — use next/dynamic`,
+            message: `Heavy component '${imp.packageName}' statically imported — use ${lazyName}`,
             evidence: { package: imp.packageName },
             estimatedBytes: mod.subtreeBytes,
             fixStrategy: {
               name: "dynamic-import",
               steps: [
-                "Replace with next/dynamic(() => import(...))",
+                vite
+                  ? "Replace with React.lazy(() => import(...)) wrapped in <Suspense>"
+                  : "Replace with next/dynamic(() => import(...))",
                 "Add a loading fallback",
               ],
             },
           });
       }
       for (const imp of mod.imports) {
-        if (!imp.resolvedPath || imp.isDynamic) continue;
+        if (!imp.resolvedPath || imp.isDynamic || imp.isTypeOnly) continue;
         const target = ctx.graph.modules.get(imp.resolvedPath);
-        if (!target || target.subtreeBytes <= dynamicImportMinSubtree) continue;
-        if (isIgnored(ctx, "missing-dynamic-import", path)) continue;
+        if (!target || target.subtreeBytes < dynamicImportMinSubtree) continue;
         reportFinding(ctx, {
             id: `${path}:missing-dynamic-import:local:${imp.resolvedPath}`,
             ruleId: "missing-dynamic-import",
             category: "loading",
-            defaultSeverity: "error",
+            defaultSeverity: "warning",
             confidence: "medium",
             file: path,
             loc: imp.loc,
-            message: "Large local module statically imported — candidate for next/dynamic",
+            message: `Large local module statically imported — candidate for ${lazyName}`,
             evidence: { module: imp.resolvedPath, subtreeBytes: target.subtreeBytes },
             estimatedBytes: target.subtreeBytes,
             fixStrategy: {
               name: "conditional-dynamic",
               steps: [
-                "Use next/dynamic for conditionally rendered large components",
+                vite
+                  ? "Use React.lazy + <Suspense> for conditionally rendered large components"
+                  : "Use next/dynamic for conditionally rendered large components",
               ],
             },
           });
