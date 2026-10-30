@@ -1,0 +1,16 @@
+[
+  "moment",
+  "moment-timezone",
+  "lodash",
+  "lodash-es",
+  "rxjs",
+  "aws-sdk",
+  "@aws-sdk/client-s3",
+  "firebase",
+  "firebase-admin",
+  "pdfjs-dist",
+  "fabric",
+  "draft-js",
+  "immutable",
+  "core-js"
+]

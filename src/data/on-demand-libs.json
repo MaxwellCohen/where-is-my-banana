@@ -1,0 +1,10 @@
+[
+  "jspdf",
+  "html2canvas",
+  "xlsx",
+  "exceljs",
+  "file-saver",
+  "jszip",
+  "qrcode",
+  "papaparse"
+]
