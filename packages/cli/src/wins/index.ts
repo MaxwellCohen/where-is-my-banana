@@ -9,7 +9,7 @@ import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, 
 import { buildGraphFromBinary } from "./binary-graph.js";
 import { buildGraphFromVite, isViteProject } from "./vite.js";
 import { attributeRoutes } from "./attribute.js";
-import { classifyWins } from "./classify.js";
+import { classifyWins, detectFramework } from "./classify.js";
 import type { WinsReport } from "./types.js";
 
 export interface RunWinsOptions {
@@ -81,7 +81,7 @@ export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   const graph = await loadGraph(opts);
   const attributions = attributeRoutes(graph, { minBytes: opts.minBytes });
   if (attributions.length === 0) throw new Error(NO_DATA_MESSAGE);
-  const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured" });
+  const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured", framework: detectFramework(opts.projectRoot) });
   return {
     version: "2",
     timestamp: new Date().toISOString(),
