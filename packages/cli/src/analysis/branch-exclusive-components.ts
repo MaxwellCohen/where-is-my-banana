@@ -318,8 +318,8 @@ function findDeclaratorInit(program: Program, name: string): AstNode | null {
     walk(toAst(program), (node) => {
       if (node.type !== "VariableDeclarator") return;
       const id = node.id as AstNode;
-      if (id.type === "Identifier" && !map.has(id.name as string)) {
-        map.set(id.name as string, (node.init as AstNode) ?? null);
+      if (id.type === "Identifier" && node.init && !map.has(id.name as string)) {
+        map.set(id.name as string, node.init as AstNode);
       }
     });
     declaratorInitCache.set(program, map);

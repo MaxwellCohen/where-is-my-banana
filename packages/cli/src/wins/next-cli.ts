@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 export const NEXT_TIMEOUT_MS = 600_000;
 
@@ -33,7 +35,10 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
   const label = `next ${args.slice(0, 2).join(" ")}`;
   const timeoutMs = opts.timeoutMs ?? NEXT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
-    const child = spawn("npx", ["--no-install", "next", ...args], {
+    const localNext = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "next.cmd" : "next");
+    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npx", ["--no-install", "next", ...args]];
+    const child = spawn(cmd as string, cmdArgs as string[], {
+      shell: process.platform === "win32",
       cwd: projectRoot,
       stdio: ["ignore", opts.capture ? "pipe" : "inherit", opts.capture ? "pipe" : "inherit"],
       env: { ...process.env, ...opts.env },

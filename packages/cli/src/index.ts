@@ -181,7 +181,7 @@ const winsCommand = defineCommand({
       minBytes = parseNumberFlag("min-bytes", args["min-bytes"]);
       routeBudgetBytes = parseNumberFlag("budget-route", args["budget-route"]);
       maxSafeWinBytes = parseNumberFlag("fail-on-safe-wins", args["fail-on-safe-wins"]);
-      top = parseNumberFlag("top", args.top) || 10;
+      top = parseNumberFlag("top", args.top) ?? 10;
       if (args.compare) {
         const file = resolve(projectRoot, args.compare);
         let data: unknown;
@@ -225,7 +225,7 @@ const winsCommand = defineCommand({
     }
     const violations = checkBudget(report, { routeBudgetBytes, maxSafeWinBytes });
     for (const v of violations) console.error(`wimb: ${v.message}`);
-    process.exitCode = violations.length ? 1 : 0;
+    process.exit(violations.length ? 1 : 0);
   },
 });
 

@@ -17,6 +17,9 @@ function validateTrees(trees: unknown, where: string): void {
       if (typeof n.id !== "string" || typeof n.label !== "string") {
         throw new Error(`Invalid graph: node missing id/label in "${route}"`);
       }
+      // Older exports may omit byte fields; default them rather than rejecting the file.
+      if (n.selfBytes === undefined) n.selfBytes = 0;
+      if (n.totalBytes === undefined) n.totalBytes = n.selfBytes;
       if (!isNum(n.totalBytes) || !isNum(n.selfBytes)) {
         throw new Error(`Invalid graph: non-numeric bytes on node "${n.id}" in "${route}"`);
       }
