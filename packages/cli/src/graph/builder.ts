@@ -315,6 +315,27 @@ function computeSubtreeBytes(modules: Map<string, Module>) {
     }
   }
 
+  if (sccs.length * ((n + 31) >>> 5) > 1 << 26) {
+    // Bitsets would exceed ~256MB: fall back to a per-SCC DFS (O(n) memory).
+    const seen = new Int32Array(n).fill(-1);
+    for (let c = 0; c < sccs.length; c++) {
+      let total = 0;
+      const todo = [...sccs[c]!];
+      for (const v of todo) seen[v] = c;
+      while (todo.length > 0) {
+        const v = todo.pop()!;
+        total += modules.get(paths[v]!)!.sourceBytes;
+        for (const w of adj[v]!) {
+          if (seen[w] === c) continue;
+          seen[w] = c;
+          todo.push(w);
+        }
+      }
+      for (const v of sccs[c]!) modules.get(paths[v]!)!.subtreeBytes = total;
+    }
+    return;
+  }
+
   // Reachability bitset per SCC (exact, handles diamonds without double counting).
   const words = (n + 31) >>> 5;
   const bits: Uint32Array[] = [];

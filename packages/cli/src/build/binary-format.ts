@@ -119,15 +119,10 @@ export function readEdgesAtIndex(binary: DataView, ref: BinaryRef | undefined, i
   const dataStart = offsetsStart + 4 * numOffsets;
   if (dataStart > binary.byteLength) return [];
 
-  // Cumulative offsets must be monotonic non-decreasing up to `index`.
-  let prevOffset = 0;
-  let endOffset = 0;
-  for (let i = 0; i <= index; i++) {
-    const cur = binary.getUint32(offsetsStart + i * 4, false);
-    if (cur < prevOffset) return [];
-    if (i < index) prevOffset = cur;
-    else endOffset = cur;
-  }
+  // Cumulative offsets must be monotonic non-decreasing at `index`.
+  const prevOffset = index > 0 ? binary.getUint32(offsetsStart + (index - 1) * 4, false) : 0;
+  const endOffset = binary.getUint32(offsetsStart + index * 4, false);
+  if (endOffset < prevOffset) return [];
   const maxEdges = Math.floor((binary.byteLength - dataStart) / 4);
   const edgeCount = Math.min(endOffset, maxEdges) - prevOffset;
   if (edgeCount <= 0) return [];

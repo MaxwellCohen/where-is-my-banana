@@ -26,9 +26,11 @@ export type Framework = "next" | "react" | "solid" | "vue" | "svelte" | "generic
 export function detectFramework(projectRoot: string): Framework {
   try {
     const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    for (const [dep, fw] of [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "react"]] as const) {
-      if (deps[dep]) return fw;
+    // Runtime dependencies win over devDependencies (a vue app may only devDepend on react tooling).
+    for (const deps of [pkg.dependencies ?? {}, pkg.devDependencies ?? {}]) {
+      for (const [dep, fw] of [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "react"]] as const) {
+        if (deps[dep]) return fw;
+      }
     }
   } catch {
     // no package.json
@@ -122,7 +124,7 @@ function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
     const expr = named ? `import(${spec}).then((m) => ({ default: ${named} }))` : `import(${spec})`;
     if (fw === "vue") return `const ${b.local} = defineAsyncComponent(() => ${expr});`;
     if (fw === "react" || fw === "solid") return `const ${b.local} = lazy(() => ${expr});`;
-    return `const ${b.local} = () => ${named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`};`;
+    return `const ${b.local}Module = () => ${named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`}; // ${fw}: render via {#await}/dynamic component, not as a plain component`;
   });
 }
 

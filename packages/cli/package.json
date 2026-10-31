@@ -44,7 +44,7 @@
     "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "tsdown",
+    "prepack": "pnpm --filter @wimb/graph-v1 build && tsdown",
     "lint:pkg": "publint"
   },
   "dependencies": {

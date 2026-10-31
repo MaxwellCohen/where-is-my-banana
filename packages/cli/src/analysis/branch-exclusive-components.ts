@@ -137,21 +137,21 @@ function collectUnconditionalComponents(program: Program, lines: string[]): Set<
   walkWithAncestors(program, (node, ancestors) => {
     const name = getJsxComponentName(node);
     if (!name) return;
-    if (!isUnderConditionalBranch(ancestors)) {
+    if (!isUnderConditionalBranch(node, ancestors)) {
       unconditional.add(name);
     }
   });
   return unconditional;
 }
 
-function isUnderConditionalBranch(ancestors: AstNode[]): boolean {
-  for (const anc of ancestors) {
-    if (
-      anc.type === "IfStatement" ||
-      anc.type === "ConditionalExpression" ||
-      (anc.type === "LogicalExpression" && anc.operator === "&&")
-    ) {
-      return true;
+function isUnderConditionalBranch(node: AstNode, ancestors: AstNode[]): boolean {
+  for (let i = 0; i < ancestors.length; i++) {
+    const anc = ancestors[i]!;
+    const child = ancestors[i + 1] ?? node;
+    if (anc.type === "LogicalExpression" && anc.operator === "&&") {
+      if (child === anc.right) return true;
+    } else if (anc.type === "IfStatement" || anc.type === "ConditionalExpression") {
+      if (child !== anc.test) return true;
     }
   }
   return false;

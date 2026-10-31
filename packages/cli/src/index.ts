@@ -80,7 +80,7 @@ const scanCommand = defineCommand({
       exitThreshold,
       forestCompact: args["forest-compact"] || args["no-ast"],
     });
-    process.exitCode = code;
+    process.exit(code);
   },
 });
 
