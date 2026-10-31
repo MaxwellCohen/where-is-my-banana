@@ -45,9 +45,9 @@ describe("graph builder edge cases", () => {
 
   it("computes chains, subtree bytes (cycles) and export refs", async () => {
     const root = project({
-      "app/page.tsx": 'import * as m from "./a";\nexport default function P(){ return m; }\n',
-      "app/a.ts": 'import { b } from "./b";\nexport const a = b;\nexport class K {}\n',
-      "app/b.ts": 'import { a } from "./a";\nexport const b = 1;\nexport const c = a;\n',
+      "app/page.tsx": 'import * as m from "../lib/a";\nexport default function P(){ return m; }\n',
+      "lib/a.ts": 'import { b } from "./b";\nexport const a = b;\nexport class K {}\n',
+      "lib/b.ts": 'import { a } from "./a";\nexport const b = 1;\nexport const c = a;\n',
     });
     const graph = await buildGraph(root);
     const get = (s: string) => [...graph.modules.values()].find((m) => m.filePath.endsWith(s))!;
