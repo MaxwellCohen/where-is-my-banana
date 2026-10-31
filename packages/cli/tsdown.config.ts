@@ -6,7 +6,7 @@ export default defineConfig({
   platform: "node",
   target: "node20",
   clean: true,
-  dts: true,
+  dts: false,
   // Standalone npx/tarball installs (no npm publish for @wimb/graph-v1).
   noExternal: [/^@wimb\/graph-v1/],
 });

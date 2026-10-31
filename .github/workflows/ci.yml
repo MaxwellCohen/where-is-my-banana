@@ -1,4 +1,6 @@
 name: ci
+permissions:
+  contents: read
 on:
   pull_request:
   push:
@@ -19,3 +21,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @wimb/visualizer build
       - run: pnpm test
+      - run: pnpm --filter @maxwellcohen/wimb lint:pkg

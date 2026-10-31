@@ -6,11 +6,11 @@ WIMB finds the import edges ("wins") that, if cut or made lazy, shrink your Next
 
 ## Quick start (run from GitHub)
 
-Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack). No clone, no npm publish.
+Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack).
 
 ```bash
 cd your-next-app
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd .
+npx @maxwellcohen/wimb wins --cwd .
 ```
 
 This runs `next analyze --output --snapshot wins` for you, then ranks the wins. Pass `--no-analyze` to reuse existing analyze data.
@@ -26,7 +26,7 @@ Track progress between runs:
 ```bash
 cp .wimb/wins.json .wimb/wins.prev.json     # before you change code
 # ...apply a fix, rerun the command...
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wimb/wins.prev.json
+npx @maxwellcohen/wimb wins --cwd . --compare .wimb/wins.prev.json
 ```
 
 ### Vite apps
@@ -34,7 +34,7 @@ npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wim
 Auto-detected when `vite` is a dependency and `next` is not (or pass `--vite`). Runs `vite build` in-process (nothing written to `dist/`) and ranks wins from Rollup's chunk/module graph. One route per HTML entry; bytes are gzip-estimated per chunk and cover the entry's static-import closure.
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --vite
+npx @maxwellcohen/wimb wins --cwd . --vite
 ```
 
 ### From a local clone instead
@@ -78,7 +78,7 @@ Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply
 ## CI budget
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . \
+npx @maxwellcohen/wimb wins --cwd . \
   --compare .wimb/wins.prev.json \
   --budget-route 250000 \
   --fail-on-safe-wins 20000
