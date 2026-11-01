@@ -6,11 +6,12 @@ import { buildAgentPrompt } from "@/lib/agent-prompt";
 export function CopyPromptButton() {
   const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  const [origin, setOrigin] = useState("https://wimb-visualizer.vercel.app");
+  useEffect(() => setOrigin(window.location.origin), []);
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   async function onCopy() {
-    const url = typeof window !== "undefined" ? window.location.origin : "https://wimb-visualizer.vercel.app";
-    const text = buildAgentPrompt(url);
+    const text = buildAgentPrompt(origin);
     let ok = true;
     try {
       await navigator.clipboard.writeText(text);
@@ -37,8 +38,11 @@ export function CopyPromptButton() {
   }
 
   return (
-    <button type="button" className="copy-prompt-btn" onClick={() => void onCopy()}>
-      {copied === "ok" ? "Copied!" : copied === "fail" ? "Copy failed" : "Copy prompt"}
-    </button>
+    <>
+      <button type="button" className="copy-prompt-btn" onClick={() => void onCopy()}>
+        {copied === "ok" ? "Copied!" : copied === "fail" ? "Copy failed" : "Copy prompt"}
+      </button>
+      <pre className="prompt-text">{buildAgentPrompt(origin)}</pre>
+    </>
   );
 }

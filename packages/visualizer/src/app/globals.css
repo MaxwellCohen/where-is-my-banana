@@ -98,6 +98,20 @@ code {
   background: rgba(198, 242, 109, 0.08);
 }
 
+.prompt-text {
+  flex-basis: 100%;
+  width: 100%;
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  text-align: left;
+  border: 1px solid var(--accent-dim);
+  border-radius: 0.35rem;
+}
+
 .upload-btn {
   background: var(--accent);
   color: #132016;

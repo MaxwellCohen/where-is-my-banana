@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from "citty";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { scan } from "./scan.js";
-import { writeVizGraph } from "./viz.js";
+import { buildDualRouteForest } from "@wimb/graph-v1";
+import type { ParsedGraph } from "@wimb/graph-v1";
+import { writeVizGraph, writeVizFile } from "./viz.js";
 import { readFileSync } from "node:fs";
 import { FlagError, parseExitThreshold, parseFormats, parseNumberFlag, validateWinsReport } from "./index-flags.js";
 import { runWins, runNextAnalyze } from "./wins/index.js";
@@ -173,6 +175,7 @@ const winsCommand = defineCommand({
     const projectRoot = resolve(args.cwd);
     let report: WinsReport;
     let prev: WinsReport | undefined;
+    let graph: ParsedGraph | undefined;
     let minBytes: number | undefined;
     let routeBudgetBytes: number | undefined;
     let maxSafeWinBytes: number | undefined;
@@ -200,6 +203,7 @@ const winsCommand = defineCommand({
       const vite = args.vite ?? isViteProject(projectRoot);
       if (!vite && args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
       report = await runWins({
+        onGraph: (g) => (graph = g),
         projectRoot,
         analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
         distDir: args["dist-dir"],
@@ -212,10 +216,17 @@ const winsCommand = defineCommand({
       return fail(err);
     }
     const { jsonPath, mdPath } = writeWins(projectRoot, report);
+    const vizPath = join(dirname(jsonPath), "bundle-graph.json");
+    try {
+      if (graph) writeVizFile(vizPath, buildDualRouteForest(graph));
+      else await writeVizGraph({ projectRoot, distDir: args["dist-dir"], outputPath: vizPath });
+    } catch (err) {
+      console.error(`wimb: skipped bundle-graph.json: ${(err as Error).message}`);
+    }
     if (args.json) console.log(JSON.stringify(report, null, 2));
     else {
       console.log(formatWinsTerminal(report, { top }));
-      console.log(`\nwimb: wrote ${jsonPath} and ${mdPath}`);
+      console.log(`\nwimb: wrote ${jsonPath}, ${mdPath} and ${vizPath}`);
     }
     if (prev) {
       const cmp = compareWins(prev, report);

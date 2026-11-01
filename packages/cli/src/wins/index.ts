@@ -6,7 +6,7 @@ import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
 import { buildGraphFromVite, isViteProject } from "../sources/vite.js";
-import { assertNextAnalyzeSupport, runNext } from "./next-cli.js";
+import { nextHasAnalyze, runNext } from "./next-cli.js";
 import { attributeRoutes } from "./attribute.js";
 import { classifyWins, detectFramework } from "./classify.js";
 import type { WinsReport } from "./types.js";
@@ -21,25 +21,24 @@ export interface RunWinsOptions {
   vite?: boolean;
   /** False when the caller skipped `next analyze` (--no-analyze); only used to explain missing data. */
   analyzed?: boolean;
+  /** Receives the parsed graph when one is built (not for the legacy binary path). */
+  onGraph?: (graph: ParsedGraph) => void;
 }
 
 const NO_DATA_HINT = "Run 'next analyze' (Next 16.4+) in the project first, or pass --analyze-export <file.jsonl[.gz]>.";
 const NO_ATTRIBUTION_MESSAGE = `No client bytes could be attributed to any route. ${NO_DATA_HINT}`;
 
 function exportJsonl(projectRoot: string, distDir: string, snapshot?: string): Promise<string> {
-  assertNextAnalyzeSupport(projectRoot);
   const args = ["analyze", "export", "--dist-dir", distDir];
   if (snapshot) args.push("--snapshot", snapshot);
   return runNext(projectRoot, args, { capture: true, env: { TURBOPACK: "1" } });
 }
 
 export async function runNextAnalyze(projectRoot: string, snapshot: string): Promise<void> {
-  assertNextAnalyzeSupport(projectRoot);
-  try {
-    await runNext(projectRoot, ["analyze", "--output", "--snapshot", snapshot]);
-  } catch (e) {
-    throw new Error(`${(e as Error).message}\nIf this Next version predates 'next analyze' (e.g. early 16.4 canaries), upgrade to 16.4.0+.`);
-  }
+  const args = nextHasAnalyze(projectRoot)
+    ? ["analyze", "--output", "--snapshot", snapshot]
+    : ["experimental-analyze", "--output"];
+  await runNext(projectRoot, args);
 }
 
 async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
@@ -73,6 +72,7 @@ async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
 
 export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   const graph = await loadGraph(opts);
+  opts.onGraph?.(graph);
   const attributions = attributeRoutes(graph, { minBytes: opts.minBytes });
   if (attributions.length === 0) throw new Error(NO_ATTRIBUTION_MESSAGE);
   const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured", framework: detectFramework(opts.projectRoot) });
