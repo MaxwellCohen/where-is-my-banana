@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { childEnv } from "../build/child-env.js";
 
 export const NEXT_TIMEOUT_MS = 600_000;
 
@@ -47,7 +48,7 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
       shell: process.platform === "win32",
       cwd: projectRoot,
       stdio: ["ignore", opts.capture ? "pipe" : "inherit", opts.capture ? "pipe" : "inherit"],
-      env: { ...process.env, ...opts.env },
+      env: childEnv(opts.env),
     });
     children.add(child);
     let out = "";
