@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Rebuild next-books (or WIMB_VIZ_SOURCE) into the visualizer demo graph.
+ * Rebuild next-books (or a path passed as the first argument) into the visualizer demo graph.
  *
  *   pnpm viz:demo
- *   WIMB_VIZ_SOURCE=/path/to/app pnpm viz:demo
+ *   pnpm viz:demo /path/to/app
  */
 import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = resolve(
-  process.env.WIMB_VIZ_SOURCE ?? join(root, "../books-demo/next-books"),
+  process.argv[2] ?? join(root, "../books-demo/next-books"),
 );
 const outJson = join(sourceRoot, ".wimb/bundle-graph.json");
 const demoPath = join(root, "packages/visualizer/public/demo-graph.json");

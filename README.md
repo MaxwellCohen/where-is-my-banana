@@ -101,11 +101,9 @@ npx @maxwellcohen/wimb wins --cwd . \
 
 ## Security notes
 
-- `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npx --no-install`) and never uses a shell on macOS/Linux.
-- Child processes get an allowlisted environment: `PATH`, framework vars (`NEXT_*`, `VITE_*`, `NODE_*`, `TURBOPACK*`), `NEXT_PUBLIC_*`, and similar. Variables that look like secrets (`*TOKEN*`, `*SECRET*`, `*API_KEY*`, ...) and unrelated cloud/registry credentials are dropped.
-- If your build needs other variables, set `WIMB_INHERIT_ENV=1` to pass the full environment.
+- `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npm exec --no-install`) and never uses a shell on macOS/Linux.
 - Releases are published from GitHub Actions with npm provenance, so each version links to the commit that built it.
-- Static analysis tools may flag `child_process` and `process.env` use in `dist/`. That is this build step.
+- Static analysis tools may flag `child_process` use in `dist/`. That is this build step.
 
 ## Config
 

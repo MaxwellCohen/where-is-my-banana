@@ -31,7 +31,7 @@ const NO_ATTRIBUTION_MESSAGE = `No client bytes could be attributed to any route
 function exportJsonl(projectRoot: string, distDir: string, snapshot?: string): Promise<string> {
   const args = ["analyze", "export", "--dist-dir", distDir];
   if (snapshot) args.push("--snapshot", snapshot);
-  return runNext(projectRoot, args, { capture: true, env: { TURBOPACK: "1" } });
+  return runNext(projectRoot, args, { capture: true });
 }
 
 export async function runNextAnalyze(projectRoot: string, snapshot: string): Promise<void> {

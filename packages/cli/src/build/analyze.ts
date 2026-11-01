@@ -11,7 +11,6 @@ import {
 } from "./binary-format.js";
 import { createExportAccumulator, parseAnalyzeExportFile } from "./analyze-export.js";
 import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
-import { childEnv } from "./child-env.js";
 
 export { normalizeModulePath, packageNameFromPath };
 
@@ -149,7 +148,6 @@ function captureAnalyze(
     execFileSync(command, fullArgs, {
       cwd: projectRoot,
       stdio: "inherit",
-      env: childEnv({ TURBOPACK: "1", TURBOPACK_STATS: "1" }),
     });
     return name;
   } catch {
@@ -176,7 +174,6 @@ function exportAnalyzeGraph(
     const child = spawn(command, fullArgs, {
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "pipe"],
-      env: childEnv({ TURBOPACK: "1" }),
     });
     const acc = createExportAccumulator();
     let pending = "";
@@ -213,7 +210,7 @@ function exportAnalyzeGraph(
 function nextCommand(projectRoot: string, args: string[]): { command: string; args: string[] } {
   const local = join(projectRoot, "node_modules", ".bin", "next");
   if (existsSync(local)) return { command: local, args };
-  return { command: "npx", args: ["next", ...args] };
+  return { command: "npm", args: ["exec", "--no-install", "--", "next", ...args] };
 }
 
 /**

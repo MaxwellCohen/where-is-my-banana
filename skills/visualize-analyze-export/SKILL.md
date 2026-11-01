@@ -54,7 +54,7 @@ pnpm exec wimb viz build --analyze-export /tmp/bundle-graph.jsonl.gz -o .wimb/bu
 
 ```bash
 pnpm viz                 # http://localhost:3340 (hot reload)
-pnpm viz:demo            # refresh demo-graph.json from next-books / WIMB_VIZ_SOURCE
+pnpm viz:demo            # refresh demo-graph.json from next-books, or pass a path
 pnpm viz:watch           # also watch @wimb/graph-v1
 ```
 

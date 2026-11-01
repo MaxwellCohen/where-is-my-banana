@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { childEnv } from "../build/child-env.js";
 
 export const NEXT_TIMEOUT_MS = 600_000;
 
@@ -9,7 +8,6 @@ export interface RunNextOptions {
   /** Capture stdout and return it; otherwise inherit stdio. */
   capture?: boolean;
   timeoutMs?: number;
-  env?: NodeJS.ProcessEnv;
 }
 
 const children = new Set<ChildProcess>();
@@ -36,19 +34,18 @@ function hookCleanup(): void {
   }
 }
 
-/** Run the project's `next` via `npx --no-install` (never downloads). Resolves with stdout when `capture` is set. */
+/** Run the project's `next` via `npm exec --no-install` (never downloads). Resolves with stdout when `capture` is set. */
 export function runNext(projectRoot: string, args: string[], opts: RunNextOptions = {}): Promise<string> {
   hookCleanup();
   const label = `next ${args.slice(0, 2).join(" ")}`;
   const timeoutMs = opts.timeoutMs ?? NEXT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const localNext = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "next.cmd" : "next");
-    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npx", ["--no-install", "next", ...args]];
+    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npm", ["exec", "--no-install", "--", "next", ...args]];
     const child = spawn(cmd as string, cmdArgs as string[], {
       shell: process.platform === "win32",
       cwd: projectRoot,
       stdio: ["ignore", opts.capture ? "pipe" : "inherit", opts.capture ? "pipe" : "inherit"],
-      env: childEnv(opts.env),
     });
     children.add(child);
     let out = "";
