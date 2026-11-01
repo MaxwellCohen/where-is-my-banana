@@ -1,0 +1,11 @@
+{"type":"meta","schema_version":1,"snapshot_name":"wins-namespace-app","module_index_hash":"x","route_count":2,"selected_routes":2}
+{"type":"module","ident":"[project]/app/page.tsx [app-client] (ecmascript)","path":"[project]/app/page.tsx","dependencies":{"sync":["[project]/node_modules/big-icons/index.js [app-client] (ecmascript)"],"async":[],"traced":[]}}
+{"type":"module","ident":"[project]/node_modules/big-icons/index.js [app-client] (ecmascript)","path":"[project]/node_modules/big-icons/index.js","dependencies":{"sync":[],"async":[],"traced":[]}}
+{"type":"module","ident":"[project]/app/reports/page.tsx [app-client] (ecmascript)","path":"[project]/app/reports/page.tsx","dependencies":{"sync":["[project]/components/HeavyReport.tsx [app-client] (ecmascript)"],"async":[],"traced":[]}}
+{"type":"module","ident":"[project]/components/HeavyReport.tsx [app-client] (ecmascript)","path":"[project]/components/HeavyReport.tsx","dependencies":{"sync":[],"async":[],"traced":[]}}
+{"type":"route","route":"/","entries":[{"route_entry_id":"/","module_ident":"[project]/app/page.tsx [app-client] (ecmascript)","module_path":"[project]/app/page.tsx","role":"route","entry_kind":"client_bootstrap"}],"coverage":{"entries":"exact","groups":"exact"}}
+{"type":"route","route":"/reports","entries":[{"route_entry_id":"/reports","module_ident":"[project]/app/reports/page.tsx [app-client] (ecmascript)","module_path":"[project]/app/reports/page.tsx","role":"route","entry_kind":"client_bootstrap"}],"coverage":{"entries":"exact","groups":"exact"}}
+{"type":"part","route":"/","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/app/page.tsx","size":2400,"compressed_size":800}
+{"type":"part","route":"/","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/node_modules/big-icons/index.js","size":450000,"compressed_size":150000}
+{"type":"part","route":"/reports","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/app/reports/page.tsx","size":2400,"compressed_size":800}
+{"type":"part","route":"/reports","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/components/HeavyReport.tsx","size":210000,"compressed_size":70000}
