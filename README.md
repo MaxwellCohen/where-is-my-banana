@@ -87,6 +87,14 @@ npx @maxwellcohen/wimb wins --cwd . \
 - `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
 - `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
 
+## Security notes
+
+- `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npx --no-install`) and never uses a shell on macOS/Linux.
+- Child processes get an allowlisted environment: `PATH`, framework vars (`NEXT_*`, `VITE_*`, `NODE_*`, `TURBOPACK*`), `NEXT_PUBLIC_*`, and similar. Variables that look like secrets (`*TOKEN*`, `*SECRET*`, `*API_KEY*`, ...) and unrelated cloud/registry credentials are dropped.
+- If your build needs other variables, set `WIMB_INHERIT_ENV=1` to pass the full environment.
+- Releases are published from GitHub Actions with npm provenance, so each version links to the commit that built it.
+- Static analysis tools may flag `child_process` and `process.env` use in `dist/`. That is this build step.
+
 ## Config
 
 `wimb.config.*` supports `thresholds`, `ignores` (`files`, `rules`) and `severityOverrides`.
