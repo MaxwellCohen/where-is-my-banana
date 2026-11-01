@@ -1,10 +1,12 @@
 # Where Is My Banana (WIMB)
 
+[![npm](https://img.shields.io/npm/v/@maxwellcohen/wimb)](https://www.npmjs.com/package/@maxwellcohen/wimb) [![license](https://img.shields.io/npm/l/@maxwellcohen/wimb)](LICENSE)
+
 >“… Because the problem with object-oriented languages is they’ve got all this implicit environment that they carry around with them. You wanted a banana but what you got was a gorilla holding the banana and the entire jungle. “ —Joe Armstrong, creator of Erlang progamming language
 
 WIMB finds the import edges ("wins") that, if cut or made lazy, shrink your Next.js App Router first-load client JS the most, and tells an agent exactly how to cut them.
 
-## Quick start (run from GitHub)
+## Quick start
 
 Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack).
 
@@ -36,18 +38,6 @@ Auto-detected when `vite` is a dependency and `next` is not (or pass `--vite`). 
 ```bash
 npx @maxwellcohen/wimb wins --cwd . --vite
 ```
-
-### From a local clone instead
-
-```bash
-git clone https://github.com/MaxwellCohen/where-is-my-banana && cd where-is-my-banana
-pnpm install && pnpm build
-node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
-```
-
-### Maintainers: releasing
-
-Bump `packages/cli/package.json` version on `main`, then push a matching tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The `release` workflow verifies the tag matches the version and is on `main`, runs build, tests and `lint:pkg`, then publishes `@maxwellcohen/wimb` to npm (trusted publishing).
 
 ## Sample output
 
@@ -90,3 +80,25 @@ npx @maxwellcohen/wimb wins --cwd . \
 ## Config
 
 `wimb.config.*` supports `thresholds`, `ignores` (`files`, `rules`) and `severityOverrides`.
+
+## Development
+
+Run from a local clone:
+
+```bash
+git clone https://github.com/MaxwellCohen/where-is-my-banana && cd where-is-my-banana
+pnpm install && pnpm build
+node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
+```
+
+### Releasing
+
+Bump `packages/cli/package.json` version on `main`, then push a matching tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The `release` workflow verifies the tag matches the version and is on `main`, runs build, tests and `lint:pkg`, then publishes `@maxwellcohen/wimb` to npm with provenance (trusted publishing).
+
+## Privacy and permissions
+
+`wimb wins` and `wimb scan --build` run your project's own `next build` / `next analyze` (or `vite build`) as a child process and pass your environment through, because builds need variables such as `NODE_ENV` and `NEXT_PUBLIC_*`. Nothing is uploaded; all output stays in `.wimb/`.
+
+## License
+
+MIT
