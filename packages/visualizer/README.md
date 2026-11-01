@@ -26,7 +26,7 @@ pnpm viz:watch
 pnpm build
 pnpm viz:demo       # writes packages/visualizer/public/demo-graph.json (local only; not deployed)
 # or point at any app:
-WIMB_VIZ_SOURCE=/path/to/app pnpm viz:demo
+pnpm viz:demo /path/to/app
 ```
 
 Then use **Open local file** on that JSON (or any `.wimb/bundle-graph.json`).
