@@ -1,7 +1,7 @@
 name: release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 permissions: {}
 jobs:
   publish:
@@ -16,12 +16,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm, registry-url: "https://registry.npmjs.org" }
-      - name: Verify tag matches package version and main
+      - name: Skip if this version is already on npm
+        id: check
         run: |
-          [ "v$(node -p "require('./packages/cli/package.json').version")" = "$GITHUB_REF_NAME" ] || { echo "tag/version mismatch"; exit 1; }
-          git fetch origin main && git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag not on main"; exit 1; }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test
-      - run: pnpm --filter @maxwellcohen/wimb lint:pkg
-      - run: pnpm --filter @maxwellcohen/wimb publish --no-git-checks
+          v=$(node -p "require('./packages/cli/package.json').version")
+          if npm view "@maxwellcohen/wimb@$v" version >/dev/null 2>&1; then echo "already=true" >> "$GITHUB_OUTPUT"; echo "v$v already published, skipping"; fi
+      - if: steps.check.outputs.already != 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.check.outputs.already != 'true'
+        run: pnpm build
+      - if: steps.check.outputs.already != 'true'
+        run: pnpm test
+      - if: steps.check.outputs.already != 'true'
+        run: pnpm --filter @maxwellcohen/wimb lint:pkg
+      - if: steps.check.outputs.already != 'true'
+        run: pnpm --filter @maxwellcohen/wimb publish --no-git-checks

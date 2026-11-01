@@ -8,3 +8,4 @@ packages/visualizer/public/demo-graph.json
 .npm-pack/
 wimb-cli-*.tgz
 .DS_Store
+packages/cli/README.md
