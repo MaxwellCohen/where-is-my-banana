@@ -1,7 +1,8 @@
 name: release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["packages/cli/package.json"]
 permissions: {}
 jobs:
   publish:
@@ -16,15 +17,21 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm, registry-url: "https://registry.npmjs.org" }
-      - name: Verify tag matches package version and main
+      - name: Skip if version already published
+        id: check
         run: |
-          [ "v$(node -p "require('./packages/cli/package.json').version")" = "$GITHUB_REF_NAME" ] || { echo "tag/version mismatch"; exit 1; }
-          git fetch origin main && git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag not on main"; exit 1; }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test
-      - run: pnpm --filter @maxwellcohen/wimb lint:pkg
+          v=$(node -p "require('./packages/cli/package.json').version")
+          if npm view "@maxwellcohen/wimb@$v" version >/dev/null 2>&1; then echo "publish=false" >> "$GITHUB_OUTPUT"; else echo "publish=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm build
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm test
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm --filter @maxwellcohen/wimb lint:pkg
       - name: Stage publish (approve on npmjs.com with 2FA)
+        if: steps.check.outputs.publish == 'true'
         run: |
           npm install -g npm@^11.15.0
           cd packages/cli && npm stage publish
