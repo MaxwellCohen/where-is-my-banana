@@ -11,11 +11,16 @@ export const staticIconMap: Rule = {
       const mod = ctx.graph.modules.get(path)!;
       const iconImports = mod.imports.filter(
         (i) =>
+          !i.isTypeOnly &&
+          !i.isDynamic &&
           i.packageName &&
-          (ctx.data.categoryMap.icons?.includes(i.packageName) ||
-            /icons?/i.test(i.packageName)),
+          ctx.data.categoryMap.icons?.includes(i.packageName),
       );
-      if (iconImports.length < iconMapMinEntries) continue;
+      const iconSymbolCount = iconImports.reduce(
+        (n, i) => n + i.namedSymbols.filter((sym) => sym && sym !== "*").length,
+        0,
+      );
+      if (iconSymbolCount < iconMapMinEntries) continue;
       if (isIgnored(ctx, "static-icon-map", path)) continue;
       reportFinding(ctx, {
           id: `${path}:static-icon-map`,
@@ -25,7 +30,7 @@ export const staticIconMap: Rule = {
           confidence: "high",
           file: path,
           message: "Large static icon map detected — imports many icon components",
-          evidence: { iconImportCount: iconImports.length },
+          evidence: { iconImportCount: iconSymbolCount },
           fixStrategy: {
             name: "lazy-icons",
             steps: [

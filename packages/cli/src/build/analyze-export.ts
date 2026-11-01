@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import type { ByteAttribution } from "../types.js";
-import { normalizeModulePath, packageNameFromPath } from "./module-path.js";
+import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
 
 /**
  * Next.js 16.4+ `next analyze export` streams graph-v1 records as JSON Lines.

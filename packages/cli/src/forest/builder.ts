@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { bfsReach } from "../graph/reach.js";
 import { join, relative, resolve } from "node:path";
 import type { ByteAttribution, Import, Module, ModuleEnv, ModuleGraph } from "../types.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -248,32 +249,22 @@ function computeClientReachableFiles(
   graph: ModuleGraph,
   reachable: Set<string>,
 ): Set<string> {
-  const clientReachable = new Set<string>();
-  const queue: string[] = [];
-
+  const seeds: string[] = [];
   for (const rel of reachable) {
     const mod = graph.modules.get(resolve(projectRoot, rel));
     if (!mod) continue;
-    if (mod.isBoundary || mod.directives.has("client-only")) {
-      clientReachable.add(rel);
-      queue.push(rel);
-    }
+    if (mod.isBoundary || mod.directives.has("client-only")) seeds.push(rel);
   }
 
-  while (queue.length > 0) {
-    const rel = queue.shift()!;
+  return bfsReach(seeds, function* (rel) {
     const mod = graph.modules.get(resolve(projectRoot, rel));
-    if (!mod) continue;
+    if (!mod) return;
     for (const imp of mod.imports) {
       if (imp.isDynamic || !imp.resolvedPath) continue;
       const childRel = relative(projectRoot, imp.resolvedPath);
-      if (!reachable.has(childRel) || clientReachable.has(childRel)) continue;
-      clientReachable.add(childRel);
-      queue.push(childRel);
+      if (reachable.has(childRel)) yield childRel;
     }
-  }
-
-  return clientReachable;
+  });
 }
 
 function buildGlobalConditionalUsageMap(

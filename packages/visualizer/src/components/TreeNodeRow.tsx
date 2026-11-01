@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { TreeNode } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
 import { pathsMatch } from "@/lib/wins";
@@ -11,7 +11,11 @@ interface Props {
   routeTotal: number;
   /** Selected win: target module + chain, for highlighting. */
   hl?: { target: string; chain: string[] } | null;
+  /** Nodes that are, or contain, the highlighted target (see `collectHitAncestors`). */
+  hits?: ReadonlySet<TreeNode>;
 }
+
+const MAX_CHILDREN = 100;
 
 function hitKind(node: TreeNode, hl: Props["hl"]): "hit" | "chain" | null {
   if (!hl || node.kind !== "module") return null;
@@ -20,18 +24,34 @@ function hitKind(node: TreeNode, hl: Props["hl"]): "hit" | "chain" | null {
   return hl.chain.some((c) => pathsMatch(p, c)) ? "chain" : null;
 }
 
-function containsHit(node: TreeNode, hl: Props["hl"]): boolean {
-  if (!hl) return false;
-  if (hitKind(node, hl) === "hit") return true;
-  return node.children.some((c) => containsHit(c, hl));
+/** One pass over the tree: every node that is or contains the highlight target. */
+export function collectHitAncestors(root: TreeNode, hl: Props["hl"]): Set<TreeNode> {
+  const out = new Set<TreeNode>();
+  if (!hl) return out;
+  const visit = (node: TreeNode): boolean => {
+    let found = hitKind(node, hl) === "hit";
+    for (const c of node.children) if (visit(c)) found = true;
+    if (found) out.add(node);
+    return found;
+  };
+  visit(root);
+  return out;
 }
 
-export function TreeNodeRow({ node, depth, routeTotal, hl }: Props) {
+export const TreeNodeRow = memo(function TreeNodeRow({ node, depth, routeTotal, hl, hits }: Props) {
   const hasChildren = node.children.length > 0;
-  const [open, setOpen] = useState(depth < 2 && !node.cycle);
+  const hasHit = !node.cycle && Boolean(hits?.has(node));
+  const [open, setOpen] = useState((depth < 2 && !node.cycle) || hasHit);
+  const [limit, setLimit] = useState(MAX_CHILDREN);
+  // Make sure a highlighted target past the page size is rendered.
+  const hitIndex = hasHit && hits ? node.children.findIndex((c) => hits.has(c)) : -1;
+  const shown = Math.max(limit, hitIndex + 1);
+  // Auto-expand when a new highlight is selected, but let the user collapse it afterwards.
+  useEffect(() => {
+    if (hasHit) setOpen(true);
+  }, [hasHit, hits]);
   const kind = hitKind(node, hl);
-  const forceOpen = !node.cycle && containsHit(node, hl);
-  const isOpen = open || forceOpen;
+  const isOpen = open;
 
   const pct =
     routeTotal > 0 ? Math.min(100, Math.round((node.totalBytes / routeTotal) * 1000) / 10) : 0;
@@ -78,17 +98,25 @@ export function TreeNodeRow({ node, depth, routeTotal, hl }: Props) {
       </div>
       {isOpen && hasChildren ? (
         <ul className="tree-children">
-          {node.children.map((child) => (
+          {node.children.slice(0, shown).map((child) => (
             <TreeNodeRow
               key={`${child.id}:${child.edgeKind ?? ""}`}
               node={child}
               depth={depth + 1}
               routeTotal={routeTotal}
               hl={hl}
+              hits={hits}
             />
           ))}
+          {node.children.length > shown ? (
+            <li className="tree-node">
+              <button type="button" className="tree-toggle" onClick={() => setLimit(shown + MAX_CHILDREN)}>
+                Show {Math.min(MAX_CHILDREN, node.children.length - shown)} more ({node.children.length - shown} hidden)
+              </button>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </li>
   );
-}
+});

@@ -13,7 +13,12 @@ export const branchExclusiveEagerImport: Rule = {
 
     for (const path of projectClientModulePaths(ctx)) {
       const mod = ctx.graph.modules.get(path)!;
-      const source = readFileSync(path, "utf-8");
+      let source: string;
+      try {
+        source = readFileSync(path, "utf-8");
+      } catch {
+        continue;
+      }
       const candidates = analyzeBranchExclusiveComponents(source, mod.ast(), mod.imports);
 
       for (const candidate of candidates) {

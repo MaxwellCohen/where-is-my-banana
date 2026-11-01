@@ -27,6 +27,10 @@ async function runKnipMain(options: Awaited<ReturnType<typeof createOptions>>) {
   return main(options);
 }
 
+/**
+ * Note: knip's `main()` runs in-process and exposes no AbortSignal, so on timeout we stop waiting
+ * (the scan continues without knip findings) but cannot cancel the underlying run.
+ */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);

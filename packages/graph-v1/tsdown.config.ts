@@ -1,8 +1,9 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/parse-file.ts"],
+  entry: { index: "src/index.ts", "parse-file": "src/parse-file.ts" },
   format: ["esm"],
-  dts: true,
+  dts: false,
   clean: true,
+  fixedExtension: false,
 });

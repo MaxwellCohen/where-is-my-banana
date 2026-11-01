@@ -129,4 +129,21 @@ export function Page({ isHome }: { isHome: boolean }) {
     expect(results[0]?.componentName).toBe("BlogIndex");
     expect(results[0]?.branch).toBe("alternate");
   });
+
+  it("treats only the right side of && as conditional", () => {
+    const right = `import { A } from './A';
+export default function P({ ok }) { return <div>{ok && <A />}</div>; }`;
+    expect(analyze(right, [staticImport("A")]).map((c) => c.componentName)).toContain("A");
+    const left = `import { A } from './A';
+export default function P({ ok }) { return <div>{(<A />) && ok ? <b/> : null}</div>; }`;
+    expect(analyze(left, [staticImport("A")])).toHaveLength(0);
+  });
+
+  it("resolves a variable declared after an uninitialised same-named declarator", () => {
+    const src = `import { Home } from './Home';
+function f() { let isHome; return isHome; }
+const isHome = usePathname() === "/home";
+export default function P() { return isHome ? <Home /> : <div/>; }`;
+    expect(analyze(src, [staticImport("Home")]).flatMap((x) => x.routes)).toContain("/home");
+  });
 });
