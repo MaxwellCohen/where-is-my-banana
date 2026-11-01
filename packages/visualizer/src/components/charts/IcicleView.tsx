@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { formatBytes } from "@/lib/format";
 import { layoutPartition, nodeColor } from "@/lib/viz-layout";
+import { buttonProps } from "@/lib/a11y";
 import type { TreeNode } from "@/lib/types";
 
 const W = 1000;
@@ -11,19 +12,22 @@ const DEPTH = 12;
 
 export function IcicleView({ root, onZoom }: { root: TreeNode; onZoom: (n: TreeNode) => void }) {
   const arcs = useMemo(() => layoutPartition(root, DEPTH), [root]);
-  const maxDepth = Math.max(...arcs.map((a) => a.depth));
+  const maxDepth = arcs.reduce((m, a) => Math.max(m, a.depth), 0);
   return (
     <svg
       className="chart"
       viewBox={`0 0 ${W} ${(maxDepth + 1) * ROW}`}
-      role="img"
-      aria-label="Icicle chart"
+      role="group"
+      aria-label={`Icicle chart of ${root.label}, ${formatBytes(root.totalBytes)}, ${arcs.length} blocks`}
     >
       {arcs.map(({ node, depth, a0, a1 }) => {
         const x = a0 * W;
         const w = (a1 - a0) * W;
         return (
-          <g key={`${node.id}:${depth}:${a0}`} onClick={() => node.children.length && onZoom(node)}>
+          <g
+            key={`${node.id}:${depth}:${a0}`}
+            {...(node.children.length ? buttonProps(`Zoom into ${node.label}, ${formatBytes(node.totalBytes)}`, () => onZoom(node)) : {})}
+          >
             <rect
               x={x}
               y={depth * ROW}

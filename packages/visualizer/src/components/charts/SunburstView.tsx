@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { formatBytes } from "@/lib/format";
 import { layoutPartition, nodeColor } from "@/lib/viz-layout";
+import { buttonProps } from "@/lib/a11y";
 import type { TreeNode } from "@/lib/types";
 
 const SIZE = 640;
@@ -23,7 +24,7 @@ export function SunburstView({ root, onZoom }: { root: TreeNode; onZoom: (n: Tre
   const arcs = useMemo(() => layoutPartition(root, RINGS), [root]);
   const ring = (R - 50) / (RINGS + 1);
   return (
-    <svg className="chart chart-square" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label="Sunburst">
+    <svg className="chart chart-square" viewBox={`0 0 ${SIZE} ${SIZE}`} role="group" aria-label={`Sunburst of ${root.label}, ${formatBytes(root.totalBytes)}, ${arcs.length} arcs`}>
       {arcs.map(({ node, depth, a0, a1 }) => (
         <path
           key={`${node.id}:${depth}:${a0}`}
@@ -31,7 +32,7 @@ export function SunburstView({ root, onZoom }: { root: TreeNode; onZoom: (n: Tre
           fill={depth === 0 ? "var(--bg2)" : nodeColor(node)}
           fillOpacity={0.85}
           stroke="var(--bg0)"
-          onClick={() => node.children.length && onZoom(node)}
+          {...(node.children.length ? buttonProps(`Zoom into ${node.label}, ${formatBytes(node.totalBytes)}`, () => onZoom(node)) : {})}
         >
           <title>{`${node.path ?? node.label}\n${formatBytes(node.totalBytes)} subtree`}</title>
         </path>

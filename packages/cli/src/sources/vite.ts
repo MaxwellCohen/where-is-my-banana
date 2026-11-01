@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import { join, relative, isAbsolute } from "node:path";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -14,6 +15,28 @@ interface ViteChunk {
   imports: string[];
   fileName: string;
   modules: Record<string, { renderedLength: number }>;
+}
+
+interface ViteModuleInfo {
+  importedIds: readonly string[];
+  dynamicallyImportedIds: readonly string[];
+}
+
+interface ViteBundleItem {
+  type: string;
+}
+
+interface ViteApi {
+  build(config: Record<string, unknown>): Promise<unknown>;
+}
+
+/** Route path for an entry chunk, derived from its facade module (project-relative) so same-named entries don't collide. */
+export function routeForEntry(facadeRel: string, fallbackName: string): string {
+  if (!facadeRel) return `/${fallbackName}`;
+  const noExt = facadeRel.replace(/\.[^./]+$/, "");
+  const isHtml = /\.html?$/.test(facadeRel);
+  const trimmed = isHtml ? noExt.replace(/(^|\/)index$/, "") : noExt;
+  return `/${trimmed}`;
 }
 
 export function isViteProject(projectRoot: string): boolean {
@@ -37,9 +60,9 @@ function modulePath(projectRoot: string, id: string): string {
 /** Runs `vite build` in-process (no files written) and builds a graph from Rollup's chunks and module edges. */
 export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGraph> {
   const req = createRequire(join(projectRoot, "package.json"));
-  let vite: any;
+  let vite: ViteApi;
   try {
-    vite = await import(req.resolve("vite"));
+    vite = (await import(pathToFileURL(req.resolve("vite")).href)) as ViteApi;
   } catch {
     throw new Error("Could not resolve 'vite' from the project. Install it or run from the project root.");
   }
@@ -48,9 +71,14 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   const chunks: ViteChunk[] = [];
   const plugin = {
     name: "wimb-collect",
-    generateBundle(this: any, _o: unknown, bundle: Record<string, any>) {
-      for (const item of Object.values(bundle)) {
-        if (item.type !== "chunk") continue;
+    generateBundle(
+      this: { getModuleInfo(id: string): ViteModuleInfo | null },
+      _o: unknown,
+      bundle: Record<string, ViteBundleItem>,
+    ) {
+      for (const entry of Object.values(bundle)) {
+        if (entry.type !== "chunk") continue;
+        const item = entry as ViteChunk;
         chunks.push(item);
         for (const id of Object.keys(item.modules)) {
           const info = this.getModuleInfo(id);
@@ -65,9 +93,10 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   };
   await vite.build({
     root: realpathSync(projectRoot),
+    mode: "production",
     logLevel: "warn",
     plugins: [plugin],
-    build: { write: false, reportCompressedSize: false },
+    build: { write: false, emptyOutDir: false, reportCompressedSize: false, watch: null },
   });
 
   const modules = new Map<string, GraphModule>();
@@ -96,8 +125,11 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   const routes = new Map<string, GraphRoute>();
   const clientPartsByRoute = new Map<string, Map<string, number>>();
   const pathRouteUsage = new Map<string, Set<string>>();
+  // Only static `imports` are followed below, so dynamic (lazy) chunks are excluded from first-load by design.
   for (const entry of chunks.filter((c) => c.isEntry)) {
-    const route = entry.name === "index" ? "/" : `/${entry.name}`;
+    const facadeId = entry.facadeModuleId ? idOf(entry.facadeModuleId) : null;
+    let route = routeForEntry(facadeId ?? "", entry.name);
+    for (let n = 2; routes.has(route); n++) route = `${routeForEntry(facadeId ?? "", entry.name)}-${n}`;
     const parts = new Map<string, number>();
     const seen = new Set<string>();
     const visit = (c: ViteChunk | undefined) => {
@@ -119,7 +151,7 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
       if (!s) pathRouteUsage.set(p, (s = new Set()));
       s.add(route);
     }
-    const facade = (entry.facadeModuleId && idOf(entry.facadeModuleId)) || "";
+    const facade = facadeId || "";
     if (facade) ensure(facade);
     routes.set(route, {
       type: "route",

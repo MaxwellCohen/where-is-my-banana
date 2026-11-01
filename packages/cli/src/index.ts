@@ -2,14 +2,19 @@
 import { defineCommand, runMain } from "citty";
 import { resolve } from "node:path";
 import { scan } from "./scan.js";
-import { parseNextConfig } from "./config.js";
 import { writeVizGraph } from "./viz.js";
 import { readFileSync } from "node:fs";
+import { FlagError, parseExitThreshold, parseFormats, parseNumberFlag, validateWinsReport } from "./index-flags.js";
 import { runWins, runNextAnalyze } from "./wins/index.js";
-import { isViteProject } from "./wins/vite.js";
+import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
 import type { WinsReport } from "./wins/types.js";
+
+function fail(err: unknown): void {
+  console.error(`wimb: ${err instanceof Error ? err.message : String(err)}`);
+  process.exitCode = err instanceof FlagError ? 2 : 1;
+}
 
 const scanCommand = defineCommand({
   meta: { name: "scan", description: "Scan a Next.js App Router project for client bloat" },
@@ -55,7 +60,14 @@ const scanCommand = defineCommand({
   },
   async run({ args }) {
     const projectRoot = resolve(args.cwd);
-    const formats = args.format.split(",").map((s) => s.trim());
+    let formats: string[];
+    let exitThreshold: "error" | "warning" | "info";
+    try {
+      formats = parseFormats(args.format);
+      exitThreshold = parseExitThreshold(args["exit-threshold"]);
+    } catch (err) {
+      return fail(err);
+    }
     const code = await scan({
       projectRoot,
       build: args.build,
@@ -65,10 +77,10 @@ const scanCommand = defineCommand({
         ? resolve(projectRoot, args["analyze-export"])
         : undefined,
       formats,
-      exitThreshold: args["exit-threshold"] as "error" | "warning" | "info",
+      exitThreshold,
       forestCompact: args["forest-compact"] || args["no-ast"],
     });
-    process.exit(code);
+    process.stdout.write("", () => process.exit(code));
   },
 });
 
@@ -107,6 +119,10 @@ const vizBuildCommand = defineCommand({
       description: "Include traced dependency edges (export JSONL only)",
       default: false,
     },
+    vite: {
+      type: "boolean",
+      description: "Analyze a Vite app via an in-process build (auto-detected when vite is a dependency and next is not)",
+    },
   },
   async run({ args }) {
     const projectRoot = resolve(args.cwd);
@@ -117,10 +133,11 @@ const vizBuildCommand = defineCommand({
     const viz = await writeVizGraph({
       analyzeExportPath: analyzeExport,
       projectRoot,
-      distDir: args["dist-dir"] ?? (await parseNextConfig(projectRoot))?.distDir,
+      distDir: args["dist-dir"],
       outputPath,
       includeAsync: args.async,
       includeTraced: args.traced,
+      vite: args.vite,
     });
     console.log(
       `wimb: wrote ${outputPath} (${viz.routes.length} routes, snapshot ${viz.meta.snapshotName ?? "unknown"})`,
@@ -155,6 +172,29 @@ const winsCommand = defineCommand({
   async run({ args }) {
     const projectRoot = resolve(args.cwd);
     let report: WinsReport;
+    let prev: WinsReport | undefined;
+    let minBytes: number | undefined;
+    let routeBudgetBytes: number | undefined;
+    let maxSafeWinBytes: number | undefined;
+    let top = 10;
+    try {
+      minBytes = parseNumberFlag("min-bytes", args["min-bytes"]);
+      routeBudgetBytes = parseNumberFlag("budget-route", args["budget-route"]);
+      maxSafeWinBytes = parseNumberFlag("fail-on-safe-wins", args["fail-on-safe-wins"]);
+      top = parseNumberFlag("top", args.top) ?? 10;
+      if (args.compare) {
+        const file = resolve(projectRoot, args.compare);
+        let data: unknown;
+        try {
+          data = JSON.parse(readFileSync(file, "utf-8"));
+        } catch (e) {
+          throw new FlagError(`cannot read --compare file ${file}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        prev = validateWinsReport(data, file);
+      }
+    } catch (err) {
+      return fail(err);
+    }
     try {
       const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
       const vite = args.vite ?? isViteProject(projectRoot);
@@ -165,31 +205,28 @@ const winsCommand = defineCommand({
         distDir: args["dist-dir"],
         snapshot,
         vite,
-        minBytes: args["min-bytes"] ? Number(args["min-bytes"]) : undefined,
+        minBytes,
+        analyzed: args.analyze,
       });
     } catch (err) {
-      console.error(`wimb: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
+      return fail(err);
     }
     const { jsonPath, mdPath } = writeWins(projectRoot, report);
     if (args.json) console.log(JSON.stringify(report, null, 2));
     else {
-      console.log(formatWinsTerminal(report, { top: Number(args.top) || 10 }));
+      console.log(formatWinsTerminal(report, { top }));
       console.log(`\nwimb: wrote ${jsonPath} and ${mdPath}`);
     }
-    if (args.compare) {
-      const prev = JSON.parse(readFileSync(resolve(projectRoot, args.compare), "utf-8")) as WinsReport;
+    if (prev) {
       const cmp = compareWins(prev, report);
       console.error("wimb: first-load delta vs previous");
       for (const r of cmp.routes) console.error(`  ${r.route}  ${r.delta >= 0 ? "+" : ""}${(r.delta / 1024).toFixed(1)} KB`);
       console.error(`  wins resolved: ${cmp.resolved.length}, new: ${cmp.introduced.length}`);
     }
-    const violations = checkBudget(report, {
-      routeBudgetBytes: args["budget-route"] ? Number(args["budget-route"]) : undefined,
-      maxSafeWinBytes: args["fail-on-safe-wins"] ? Number(args["fail-on-safe-wins"]) : undefined,
-    });
+    const violations = checkBudget(report, { routeBudgetBytes, maxSafeWinBytes });
     for (const v of violations) console.error(`wimb: ${v.message}`);
-    process.exit(violations.length ? 1 : 0);
+    const exitCode = violations.length ? 1 : 0;
+    process.stdout.write("", () => process.exit(exitCode));
   },
 });
 

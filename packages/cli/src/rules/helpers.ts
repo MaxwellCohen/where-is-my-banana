@@ -1,5 +1,5 @@
-import { relative, resolve } from "node:path";
-import type { RuleContext, Finding, Severity, Module, Loc } from "../types.js";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+import type { RuleContext, Finding, Severity, Module, Loc, ModuleGraph } from "../types.js";
 import { relPath } from "../graph/builder.js";
 
 export function reportFinding(
@@ -18,7 +18,7 @@ export function makeFinding(
   const site = resolveReportSite(ctx, partial.file, partial.loc);
   if (!site) return null;
   const file =
-    site.file.startsWith("/") || site.file.includes(ctx.projectRoot)
+    isAbsolute(site.file) || site.file.includes(ctx.projectRoot)
       ? relPath(ctx.projectRoot, site.file)
       : site.file;
   return {
@@ -45,7 +45,17 @@ export function isFrameworkPackage(ctx: RuleContext, packageName: string): boole
 
 export function isIgnored(ctx: RuleContext, ruleId: string, file: string): boolean {
   if (ctx.config.ignores.rules.includes(ruleId)) return true;
-  return ctx.config.ignores.files.some((p) => file.includes(p));
+  const normFile = file.replace(/\\/g, "/");
+  return ctx.config.ignores.files.some((p) => {
+    const norm = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!norm) return false;
+    return normFile.includes(norm);
+  });
+}
+
+export function isViteApp(ctx: RuleContext): boolean {
+  const deps = { ...ctx.pkg.dependencies, ...ctx.pkg.devDependencies };
+  return Boolean(deps.vite) && !deps.next;
 }
 
 export function isProjectSource(ctx: RuleContext, filePath: string): boolean {
@@ -77,9 +87,55 @@ export function resolveReportSite(
 }
 
 function toAbsolutePath(ctx: RuleContext, filePath: string): string {
-  if (filePath.startsWith("/")) return filePath;
+  if (isAbsolute(filePath)) return filePath;
   if (filePath.includes(ctx.projectRoot)) return filePath;
   return resolve(ctx.projectRoot, filePath);
+}
+
+interface ImporterSite {
+  file: string;
+  loc?: Loc;
+}
+
+interface ImporterIndex {
+  byPath: Map<string, ImporterSite[]>;
+  byPackage: Map<string, ImporterSite[]>;
+}
+
+const importerIndexCache = new WeakMap<ModuleGraph, ImporterIndex>();
+
+function getImporterIndex(ctx: RuleContext): ImporterIndex {
+  const cached = importerIndexCache.get(ctx.graph);
+  if (cached) return cached;
+  const byPath = new Map<string, ImporterSite[]>();
+  const byPackage = new Map<string, ImporterSite[]>();
+  const push = (m: Map<string, ImporterSite[]>, key: string, site: ImporterSite) => {
+    const list = m.get(key);
+    if (list) list.push(site);
+    else m.set(key, [site]);
+  };
+  const mods = [...ctx.graph.modules.values()]
+    .filter((m) => isProjectSource(ctx, m.filePath))
+    .sort((a, b) => (a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0));
+  for (const mod of mods) {
+    for (const imp of mod.imports) {
+      const site = { file: mod.filePath, loc: imp.loc };
+      if (imp.resolvedPath) push(byPath, imp.resolvedPath, site);
+      if (imp.packageName) push(byPackage, imp.packageName, site);
+    }
+  }
+  const index = { byPath, byPackage };
+  importerIndexCache.set(ctx.graph, index);
+  return index;
+}
+
+function packageNameFromPath(filePath: string): string | null {
+  const norm = filePath.replace(/\\/g, "/");
+  const idx = norm.lastIndexOf("/node_modules/");
+  if (idx === -1) return null;
+  const parts = norm.slice(idx + "/node_modules/".length).split("/");
+  if (!parts[0]) return null;
+  return parts[0].startsWith("@") && parts[1] ? `${parts[0]}/${parts[1]}` : parts[0];
 }
 
 function findDirectProjectImporter(
@@ -87,19 +143,24 @@ function findDirectProjectImporter(
   targetPath: string,
 ): { file: string; loc?: Loc } | null {
   const targetAbs = toAbsolutePath(ctx, targetPath);
-  for (const mod of ctx.graph.modules.values()) {
-    if (!isProjectSource(ctx, mod.filePath)) continue;
-    for (const imp of mod.imports) {
-      if (!imp.resolvedPath) continue;
-      if (imp.resolvedPath === targetAbs || targetAbs.startsWith(`${imp.resolvedPath}/`)) {
-        return { file: mod.filePath, loc: imp.loc };
-      }
-      if (imp.packageName && packagePathMatches(targetAbs, imp.packageName)) {
-        return { file: mod.filePath, loc: imp.loc };
-      }
-    }
+  const index = getImporterIndex(ctx);
+  const candidates: ImporterSite[] = [];
+  for (let p = targetAbs, prev = ""; p !== prev; prev = p, p = dirname(p)) {
+    const hit = index.byPath.get(p);
+    if (hit) candidates.push(...hit);
   }
-  return null;
+  const pkgName = packageNameFromPath(targetAbs);
+  if (pkgName) {
+    const hit = index.byPackage.get(pkgName);
+    if (hit) candidates.push(...hit);
+  }
+  if (!candidates.length) return null;
+  const chain = ctx.graph.modules.get(targetAbs)?.importChainFromEntry;
+  if (chain) {
+    const onChain = candidates.find((c) => chain.includes(c.file));
+    if (onChain) return onChain;
+  }
+  return candidates[0]!;
 }
 
 function importSiteFromChain(ctx: RuleContext, mod: Module): { file: string; loc?: Loc } | null {

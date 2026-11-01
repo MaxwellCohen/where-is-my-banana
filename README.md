@@ -6,11 +6,11 @@ WIMB finds the import edges ("wins") that, if cut or made lazy, shrink your Next
 
 ## Quick start (run from GitHub)
 
-Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack). No clone, no npm publish.
+Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack).
 
 ```bash
 cd your-next-app
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd .
+npx @maxwellcohen/wimb wins --cwd .
 ```
 
 This runs `next analyze --output --snapshot wins` for you, then ranks the wins. Pass `--no-analyze` to reuse existing analyze data.
@@ -19,14 +19,14 @@ Outputs `.wimb/wins.json` (machine) and `.wimb/wins.md` (human). Add `.wimb/` to
 
 Useful flags: `--top 20`, `--min-bytes 5000`, `--snapshot wins`, `--analyze-export graph.jsonl` (use a file you exported yourself: `npx next analyze export > graph.jsonl`).
 
-Older Next (16.1-16.3): step 1 is `npx next experimental-analyze --output`; `wimb wins` reads the binary artifacts it writes.
+Older Next (16.1-16.3): `wimb wins` needs Next 16.4+; use `wimb scan` instead.
 
 Track progress between runs:
 
 ```bash
 cp .wimb/wins.json .wimb/wins.prev.json     # before you change code
 # ...apply a fix, rerun the command...
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wimb/wins.prev.json
+npx @maxwellcohen/wimb wins --cwd . --compare .wimb/wins.prev.json
 ```
 
 ### Vite apps
@@ -34,7 +34,7 @@ npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --compare .wim
 Auto-detected when `vite` is a dependency and `next` is not (or pass `--vite`). Runs `vite build` in-process (nothing written to `dist/`) and ranks wins from Rollup's chunk/module graph. One route per HTML entry; bytes are gzip-estimated per chunk and cover the entry's static-import closure.
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . --vite
+npx @maxwellcohen/wimb wins --cwd . --vite
 ```
 
 ### From a local clone instead
@@ -45,13 +45,9 @@ pnpm install && pnpm build
 node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
 ```
 
-### Maintainers: refresh the `npx` branch
+### Maintainers: releasing
 
-The GitHub command runs the orphan `npx` branch, which must be rebuilt after changes:
-
-```bash
-pnpm install && pnpm pack:npx:push   # rebuilds and force-pushes origin/npx
-```
+Bump `packages/cli/package.json` version on `main`, then push a matching tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The `release` workflow verifies the tag matches the version and is on `main`, runs build, tests and `lint:pkg`, then publishes `@maxwellcohen/wimb` to npm (trusted publishing).
 
 ## Sample output
 
@@ -76,7 +72,7 @@ Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply
 ## CI budget
 
 ```bash
-npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . \
+npx @maxwellcohen/wimb wins --cwd . \
   --compare .wimb/wins.prev.json \
   --budget-route 250000 \
   --fail-on-safe-wins 20000
@@ -87,9 +83,9 @@ npx --yes github:MaxwellCohen/where-is-my-banana#npx wins --cwd . \
 
 ## Other commands
 
-- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--min-bytes`, `--top N`, `--json`, `--compare`.
-- `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`).
-- `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`.
+- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`. Invalid flag values exit 2.
+- `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
+- `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
 
 ## Config
 

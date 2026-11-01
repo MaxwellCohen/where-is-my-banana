@@ -25,7 +25,7 @@ export function extractImports(
   ) => string | null,
 ): Import[] {
   const imports: Import[] = [];
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
   const dynamicSpecifiers = collectDynamicSpecifiers(program);
 
   for (const stmt of program.body) {
