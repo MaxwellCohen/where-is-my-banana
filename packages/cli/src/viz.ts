@@ -50,6 +50,12 @@ export async function buildVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
   return buildRouteForestFromBinary(dataDir);
 }
 
+export function writeVizFile(outputPath: string, viz: VizGraph): void {
+  const out = resolve(outputPath);
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, `${JSON.stringify(viz, null, 2)}\n`, "utf-8");
+}
+
 export async function writeVizGraph(opts: VizBuildOptions): Promise<VizGraph> {
   const viz = await buildVizGraph(opts);
   const out = resolve(opts.outputPath);

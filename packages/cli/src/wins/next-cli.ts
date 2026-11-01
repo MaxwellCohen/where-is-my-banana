@@ -78,18 +78,14 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
   });
 }
 
-/** `next analyze --output` / `analyze export` need Next 16.4+; fail early with a clear message otherwise. */
-export function assertNextAnalyzeSupport(projectRoot: string): void {
+/** `next analyze` / `analyze export` need Next 16.4+; older 16.x only has `experimental-analyze`. Unknown version => assume new. */
+export function nextHasAnalyze(projectRoot: string): boolean {
   let version: string;
   try {
     version = JSON.parse(readFileSync(join(projectRoot, "node_modules", "next", "package.json"), "utf-8")).version;
   } catch {
-    return;
+    return true;
   }
   const [major, minor] = version.split(/[.-]/).map(Number);
-  if (major < 16 || (major === 16 && minor < 4)) {
-    throw new Error(
-      `wimb wins needs Next.js 16.4+ (found ${version}). Upgrade next, pass --analyze-export <file.jsonl>, or use 'wimb scan'.`,
-    );
-  }
+  return major > 16 || (major === 16 && minor >= 4);
 }

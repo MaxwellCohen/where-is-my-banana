@@ -1,47 +1,18 @@
 /** Agent prompt that captures a Next.js analyze graph and loads it into this visualizer. */
 export function buildAgentPrompt(visualizerUrl: string): string {
   const url = visualizerUrl.replace(/\/$/, "");
-  return `Build a WIMB bundle-forest graph for this Next.js App Router project and open it in the hosted visualizer.
+  return `Reduce this project's first-load client JS (Next.js 16+ or Vite). Do not upgrade \`next\`.
 
-Do not upgrade the app's \`next\` version.
-
-## Steps
-
-Run everything from the project root (Node >= 20). WIMB runs from GitHub via npx; do not clone it or install anything.
-
-1. Capture the Turbopack module graph and a JSONL export (no package.json changes):
+1. From the project root (Node >= 20), measure and rank the wins. It auto-detects Next/Vite and writes \`.wimb/\` (add it to .gitignore):
 
 \`\`\`bash
-mkdir -p .wimb
-npx next analyze --output --snapshot wimb
-npx next analyze export --snapshot wimb > .wimb/graph.jsonl
+npx --yes @maxwellcohen/wimb wins
 \`\`\`
 
-Older Next (16.1-16.3) has no \`analyze export\`: use \`npx next experimental-analyze --output\` and skip \`--analyze-export\` below.
+2. Apply the top safe win in \`.wimb/wins.json\`, re-run the command, and keep the edit only if the bytes drop. Repeat.
 
-2. Build the forest and the ranked wins:
+3. Optional: inspect the graph at ${url}. Click **Open local file** and pick \`.wimb/bundle-graph.json\`; nothing is uploaded.
 
-\`\`\`bash
-npx --yes @maxwellcohen/wimb viz build --analyze-export .wimb/graph.jsonl -o .wimb/bundle-graph.json
-npx --yes @maxwellcohen/wimb wins --analyze-export .wimb/graph.jsonl --cwd .
-\`\`\`
-
-Outputs \`.wimb/bundle-graph.json\` and \`.wimb/wins.json\`. Add \`.wimb/\` to \`.gitignore\`. Optional: \`--async\` on \`viz build\` includes dynamic import edges.
-
-3. Open the visualizer and open the graph **locally in the browser** (nothing is uploaded to the host):
-
-- URL: ${url}
-- Click **Open local file**
-- Choose \`.wimb/bundle-graph.json\` from this project (parsed client-side only)
-- Click **Open wins.json** and choose \`.wimb/wins.json\`
-
-Privacy: do not POST the graph to any API, gist, or chat attachment unless the user explicitly asks. The hosted app has no server upload endpoint.
-
-## Success criteria
-
-- Hosted page starts blank until the local JSON is opened
-- Visualizer shows this project's routes
-- Client / Server filter and Sorted files view work
-- Brief summary of the heaviest app files by "pulls in" weight on the default route
+Finish with the before/after first-load size and the edits made.
 `;
 }

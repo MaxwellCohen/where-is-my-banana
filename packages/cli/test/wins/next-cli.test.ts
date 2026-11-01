@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNextAnalyzeSupport, runNext } from "../../src/wins/next-cli.js";
+import { nextHasAnalyze, runNext } from "../../src/wins/next-cli.js";
 
 function projectWithNext(version?: string): string {
   const dir = mkdtempSync(join(tmpdir(), "wins-next-"));
@@ -13,15 +13,15 @@ function projectWithNext(version?: string): string {
   return dir;
 }
 
-describe("assertNextAnalyzeSupport", () => {
-  it.each(["16.3.0", "14.2.22", "15.6.0-canary.55"])("throws for %s", (v) => {
-    expect(() => assertNextAnalyzeSupport(projectWithNext(v))).toThrow(/Next\.js 16\.4\+/);
+describe("nextHasAnalyze", () => {
+  it.each(["16.3.0", "16.1.0", "15.6.0-canary.55"])("false for %s", (v) => {
+    expect(nextHasAnalyze(projectWithNext(v))).toBe(false);
   });
-  it.each(["16.4.0", "16.4.0-canary.2", "17.0.0"])("accepts %s", (v) => {
-    expect(() => assertNextAnalyzeSupport(projectWithNext(v))).not.toThrow();
+  it.each(["16.4.0", "16.4.0-canary.2", "17.0.0"])("true for %s", (v) => {
+    expect(nextHasAnalyze(projectWithNext(v))).toBe(true);
   });
-  it("does not throw when next is not installed", () => {
-    expect(() => assertNextAnalyzeSupport(projectWithNext())).not.toThrow();
+  it("assumes new when next is not installed", () => {
+    expect(nextHasAnalyze(projectWithNext())).toBe(true);
   });
 });
 
