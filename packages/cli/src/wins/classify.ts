@@ -21,14 +21,14 @@ export interface ClassifyContext {
   framework?: Framework;
 }
 
-export type Framework = "next" | "react" | "solid" | "vue" | "svelte" | "generic";
+export type Framework = "next" | "react" | "preact" | "solid" | "vue" | "svelte" | "generic";
 
 export function detectFramework(projectRoot: string): Framework {
   try {
     const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
     // Runtime dependencies win over devDependencies (a vue app may only devDepend on react tooling).
     for (const deps of [pkg.dependencies ?? {}, pkg.devDependencies ?? {}]) {
-      for (const [dep, fw] of [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "react"]] as const) {
+      for (const [dep, fw] of [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "preact"]] as const) {
         if (deps[dep]) return fw;
       }
     }
@@ -108,6 +108,7 @@ const isIdent = (s: string) => /^[A-Za-z_$][\w$]*$/.test(s);
 
 const LAZY_IMPORT: Partial<Record<Framework, string>> = {
   react: `import { lazy } from 'react';`,
+  preact: `import { lazy } from 'preact/compat';`,
   solid: `import { lazy } from 'solid-js';`,
   vue: `import { defineAsyncComponent } from 'vue';`,
 };
@@ -116,6 +117,8 @@ const LAZY_IMPORT: Partial<Record<Framework, string>> = {
 function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
   return u.bindings.map((b) => {
     const spec = `'${u.specifier}'`;
+    if (b.kind === "namespace" && fw !== "next" && fw !== "svelte" && fw !== "generic")
+      return `const ${b.local} = await import(${spec}); // namespace import: use inside an async function/effect/handler, not as a component`;
     const named = b.kind === "named" ? (isIdent(b.imported) ? `m.${b.imported}` : `m["${b.imported}"]`) : null;
     if (fw === "next") {
       const expr = named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`;
@@ -123,7 +126,7 @@ function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
     }
     const expr = named ? `import(${spec}).then((m) => ({ default: ${named} }))` : `import(${spec})`;
     if (fw === "vue") return `const ${b.local} = defineAsyncComponent(() => ${expr});`;
-    if (fw === "react" || fw === "solid") return `const ${b.local} = lazy(() => ${expr});`;
+    if (fw === "react" || fw === "preact" || fw === "solid") return `const ${b.local} = lazy(() => ${expr});`;
     return `const ${b.local}Module = () => ${named ? `import(${spec}).then((m) => ${named})` : `import(${spec})`}; // ${fw}: render via {#await}/dynamic component, not as a plain component`;
   });
 }
@@ -223,6 +226,7 @@ export async function classifyWins(
       if (usage === "always-rendered") reasons.add("needs-ssr");
       if (u?.found && u.inSuspense) reasons.add("already-in-suspense");
       if (u?.found && u.bindings.some((b) => b.kind === "named")) reasons.add("named-export");
+      if (u?.found && u.bindings.some((b) => b.kind === "namespace")) reasons.add("unresolved-usage");
       if (facts && !facts.hasDefault) reasons.add("no-default-export");
     }
     if (usage === "unknown" && fixKind !== "remove") reasons.add("unresolved-usage");
@@ -344,11 +348,11 @@ function buildEdit(
       const ssrFalse = fw === "next" && usage !== "always-rendered" && (u.isClient || !u.isPageOrLayout);
       const opts = ssrFalse ? "{ ssr: false, loading: () => null }" : "{ loading: () => null }";
       const stepsNamed = u.bindings.some((b) => b.kind === "named");
-      const helper = { next: "next/dynamic", react: "React.lazy", solid: "solid-js lazy", vue: "defineAsyncComponent", svelte: "dynamic import()", generic: "dynamic import()" }[fw];
+      const helper = { next: "next/dynamic", react: "React.lazy", preact: "preact/compat lazy", solid: "solid-js lazy", vue: "defineAsyncComponent", svelte: "dynamic import()", generic: "dynamic import()" }[fw];
       const header = fw === "next" ? [`import dynamic from 'next/dynamic';`] : LAZY_IMPORT[fw] ? [LAZY_IMPORT[fw]!] : [];
       const boundary =
-        fw === "react" || fw === "solid"
-          ? [`Wrap the rendered component in <Suspense fallback={...}> (${fw === "solid" ? "solid-js" : "react"}).`]
+        fw === "react" || fw === "preact" || fw === "solid"
+          ? [`Wrap the rendered component in <Suspense fallback={...}> (${fw === "solid" ? "solid-js" : fw === "preact" ? "preact/compat" : "react"}).`]
           : fw === "vue"
             ? ["Optionally pass { loadingComponent } to defineAsyncComponent or wrap in <Suspense>."]
             : [];

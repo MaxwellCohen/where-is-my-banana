@@ -309,7 +309,7 @@ export function VisualizerApp() {
             {wins ? (
               <>
                 <h2>Top wins{routeWins.length ? ` · ${selected}` : ""}</h2>
-                <WinsPanel wins={sortedWins} selectedId={winId} onSelect={setWinId} />
+                <WinsPanel wins={sortedWins} droppedWins={wins.droppedWins} selectedId={winId} onSelect={setWinId} />
               </>
             ) : null}
 

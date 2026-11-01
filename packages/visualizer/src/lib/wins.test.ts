@@ -26,12 +26,25 @@ describe("parseWinsReport", () => {
         win({ id: "bad2", edge: null }),
         win({ id: "bad3", chain: [1] }),
         win({ id: "bad4", fixKind: "nope" }),
-        win({ id: "bad5", routes: { "/": "x" } }),
         null,
       ]),
     );
     expect(r.wins.map((w) => w.id)).toEqual(["w1"]);
     expect(r.routes).toHaveLength(1);
+  });
+  it("tolerates missing verify / unknown safety+usage and counts drops", () => {
+    const r = parseWinsReport({
+      ...report([
+        win({ id: "t1", safety: "weird", usage: 5, edit: { summary: "s", steps: [] } }),
+        win({ id: "t2", routes: { "/": 1, "/x": "bad" } }),
+        win({ id: "bad", fixKind: "nope" }),
+      ]),
+      version: "3",
+    });
+    expect(r.version).toBe("3");
+    expect(r.droppedWins).toBe(1);
+    expect(r.wins[0]).toMatchObject({ safety: "needs-review", usage: "unknown", edit: { verify: "" } });
+    expect(r.wins[1].routes).toEqual({ "/": 1 });
   });
   it("rejects wrong envelope", () => {
     expect(() => parseWinsReport({ wins: [] })).toThrow(/WinsReport/);

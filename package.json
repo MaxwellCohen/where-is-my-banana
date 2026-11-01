@@ -7,7 +7,7 @@
     "build": "pnpm --filter @wimb/graph-v1 build && pnpm --filter @maxwellcohen/wimb build",
     "build:all": "pnpm build && pnpm --filter @wimb/visualizer build",
     "typecheck": "pnpm --filter @maxwellcohen/wimb exec tsc --noEmit -p . && pnpm --filter @maxwellcohen/wimb exec tsc --noEmit -p ../graph-v1 && pnpm --filter @maxwellcohen/wimb exec tsc --noEmit -p ../visualizer",
-    "test": "pnpm --filter @wimb/graph-v1 test && pnpm --filter @maxwellcohen/wimb test",
+    "test": "pnpm --filter @wimb/graph-v1 test && pnpm --filter @maxwellcohen/wimb test && pnpm --filter @wimb/visualizer test",
     "dev": "pnpm --filter @maxwellcohen/wimb dev",
     "viz": "pnpm --filter @wimb/visualizer dev",
     "viz:demo": "node scripts/refresh-viz-demo.mjs",

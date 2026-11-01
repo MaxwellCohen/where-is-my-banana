@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const NEXT_TIMEOUT_MS = 600_000;
@@ -14,11 +14,17 @@ export interface RunNextOptions {
 const children = new Set<ChildProcess>();
 let hooked = false;
 
+function killChild(c: ChildProcess): void {
+  if (process.platform === "win32" && c.pid) {
+    spawn("taskkill", ["/pid", String(c.pid), "/T", "/F"], { stdio: "ignore" }).on("error", () => {});
+  } else c.kill("SIGTERM");
+}
+
 function hookCleanup(): void {
   if (hooked) return;
   hooked = true;
   const killAll = () => {
-    for (const c of children) c.kill("SIGTERM");
+    for (const c of children) killChild(c);
   };
   process.on("exit", killAll);
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -49,7 +55,7 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killChild(child);
     }, timeoutMs);
     child.stdout?.setEncoding("utf-8");
     child.stdout?.on("data", (c: string) => (out += c));
@@ -62,11 +68,27 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
       done();
       reject(e);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       done();
       if (timedOut) return reject(new Error(`${label} timed out after ${timeoutMs}ms`));
       if (code === 0) return resolve(out);
-      reject(new Error(`${label} failed (exit ${code})${err.trim() ? `\n${err.trim()}` : ""}`));
+      reject(new Error(`${label} failed (${signal ? `killed by ${signal}` : `exit ${code}`})${err.trim() ? `\n${err.trim()}` : ""}`));
     });
   });
+}
+
+/** `next analyze --output` / `analyze export` need Next 16.4+; fail early with a clear message otherwise. */
+export function assertNextAnalyzeSupport(projectRoot: string): void {
+  let version: string;
+  try {
+    version = JSON.parse(readFileSync(join(projectRoot, "node_modules", "next", "package.json"), "utf-8")).version;
+  } catch {
+    return;
+  }
+  const [major, minor] = version.split(/[.-]/).map(Number);
+  if (major < 16 || (major === 16 && minor < 4)) {
+    throw new Error(
+      `wimb wins needs Next.js 16.4+ (found ${version}). Upgrade next, pass --analyze-export <file.jsonl>, or use 'wimb scan'.`,
+    );
+  }
 }

@@ -54,6 +54,7 @@ export function run(
     deps?: Record<string, string>;
     installSizes?: Record<string, number>;
     thresholds?: Partial<RuleContext["config"]["thresholds"]>;
+    ignoreFiles?: string[];
   } = {},
 ): Finding[] {
   const modules = new Map(mods.map((m) => [m.filePath, m]));
@@ -68,7 +69,11 @@ export function run(
   rule.run({
     projectRoot: ROOT,
     graph,
-    config: { ...DEFAULT_CONFIG, thresholds: { ...DEFAULT_CONFIG.thresholds, ...opts.thresholds } },
+    config: {
+      ...DEFAULT_CONFIG,
+      thresholds: { ...DEFAULT_CONFIG.thresholds, ...opts.thresholds },
+      ignores: { ...DEFAULT_CONFIG.ignores, files: opts.ignoreFiles ?? DEFAULT_CONFIG.ignores.files },
+    },
     pkg: {
       dependencies: opts.deps ?? {},
       devDependencies: {},

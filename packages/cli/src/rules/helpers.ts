@@ -49,7 +49,7 @@ export function isIgnored(ctx: RuleContext, ruleId: string, file: string): boole
   return ctx.config.ignores.files.some((p) => {
     const norm = p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
     if (!norm) return false;
-    return `/${normFile}/`.includes(`/${norm}/`);
+    return normFile.includes(norm);
   });
 }
 

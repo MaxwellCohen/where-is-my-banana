@@ -8,5 +8,6 @@ export default defineConfig({
   clean: true,
   dts: false,
   // @wimb/graph-v1 is private: inline it so the published CLI is standalone.
-  noExternal: [/^@wimb\/graph-v1/],
+  fixedExtension: false,
+  deps: { alwaysBundle: [/^@wimb\/graph-v1/] },
 });

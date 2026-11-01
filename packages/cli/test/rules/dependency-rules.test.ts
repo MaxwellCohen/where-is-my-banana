@@ -19,11 +19,52 @@ describe("transitive-heavy-dependency", () => {
     }),
   ];
 
-  it("reports the chain even when also imported directly", () => {
-    const f = run(transitiveHeavyDependency, mods(), { installSizes: { "heavy-lib": 9_999_999 } });
+  it("skips packages imported directly by project source", () => {
+    expect(run(transitiveHeavyDependency, mods(), { installSizes: { "heavy-lib": 9_999_999 } })).toHaveLength(0);
+  });
+
+  it("reports chain and via for purely transitive imports", () => {
+    const m = mods();
+    m[0]!.imports = [imp("mid", { resolvedPath: mid })];
+    const f = run(transitiveHeavyDependency, m, { installSizes: { "heavy-lib": 9_999_999 } });
     expect(f).toHaveLength(1);
     expect((f[0]!.evidence.chain as string[]).length).toBe(2);
+    expect(f[0]!.evidence.via).toBe("node_modules/mid/index.js");
     expect(f[0]!.file).toBe("app/page.tsx");
+  });
+
+  it("prefers reachable importers over unreachable ones", () => {
+    const orphan = `${ROOT}/node_modules/a-orphan/index.js`;
+    const m = [
+      mod(page, { imports: [imp("mid", { resolvedPath: mid })] }),
+      mod(mid, { imports: [imp("heavy-lib")], importChainFromEntry: [page, mid] }),
+      mod(orphan, { imports: [imp("heavy-lib")], importChainFromEntry: [] }),
+    ];
+    const f = run(transitiveHeavyDependency, m, { installSizes: { "heavy-lib": 9_999_999 } });
+    expect(f).toHaveLength(1);
+    expect(f[0]!.evidence.via).toBe("node_modules/mid/index.js");
+    expect(f[0]!.file).toBe("app/page.tsx");
+  });
+
+  it("falls back to an unreachable importer", () => {
+    const orphan = `${ROOT}/node_modules/orphan/index.js`;
+    const m = [
+      mod(page, { imports: [imp("orphan", { resolvedPath: orphan })] }),
+      mod(orphan, { imports: [imp("heavy-lib")], importChainFromEntry: [] }),
+    ];
+    const f = run(transitiveHeavyDependency, m, { installSizes: { "heavy-lib": 9_999_999 } });
+    expect(f).toHaveLength(1);
+    expect(f[0]!.file).toBe("app/page.tsx");
+    expect(f[0]!.evidence.via).toBe("node_modules/orphan/index.js");
+  });
+
+  it("ignores.files uses substring matching", () => {
+    const m = mods();
+    m[0]!.imports = [imp("mid", { resolvedPath: mid })];
+    const opts = { installSizes: { "heavy-lib": 9_999_999 } };
+    expect(run(transitiveHeavyDependency, m, { ...opts, ignoreFiles: ["heavy"] })).toHaveLength(0);
+    expect(run(transitiveHeavyDependency, m, { ...opts, ignoreFiles: ["./heav/"] })).toHaveLength(0);
+    expect(run(transitiveHeavyDependency, m, { ...opts, ignoreFiles: ["nomatch"] })).toHaveLength(1);
   });
 
   it("ignores small packages", () => {

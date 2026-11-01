@@ -25,7 +25,10 @@ export interface Win {
 }
 
 export interface WinsReport {
-  version: "2";
+  /** Version string from the input report (e.g. "2"); "unknown" if absent. */
+  version: string;
+  /** Number of wins in the input that were too malformed to load. */
+  droppedWins: number;
   timestamp: string;
   projectRoot: string;
   byteSource: "measured" | "estimated";
@@ -42,27 +45,40 @@ const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) 
 function parseWin(v: unknown): Win | null {
   if (!isObj(v) || typeof v.id !== "string") return null;
   if (!FIX_KINDS.includes(v.fixKind as FixKind)) return null;
-  if (v.safety !== "safe" && v.safety !== "needs-review") return null;
-  if (!isStrArr(v.safetyReasons) || !isStrArr(v.chain)) return null;
-  if (typeof v.usage !== "string" || !isNum(v.totalSavedBytes)) return null;
+  if (!isStrArr(v.chain)) return null;
+  if (!isNum(v.totalSavedBytes)) return null;
   const edge = v.edge;
   if (!isObj(edge) || typeof edge.importer !== "string" || typeof edge.imported !== "string") return null;
   if (edge.packageName !== null && typeof edge.packageName !== "string") return null;
-  if (!isObj(v.routes) || !Object.values(v.routes).every(isNum)) return null;
+  if (!isObj(v.routes)) return null;
+  const routes: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v.routes)) if (isNum(n)) routes[k] = n;
   const edit = v.edit;
-  if (!isObj(edit) || typeof edit.summary !== "string" || typeof edit.verify !== "string") return null;
-  if (!isStrArr(edit.steps)) return null;
-  if (edit.replacementImport !== undefined && typeof edit.replacementImport !== "string") return null;
-  if (edit.originalImport !== undefined && typeof edit.originalImport !== "string") return null;
+  if (!isObj(edit) || typeof edit.summary !== "string" || !isStrArr(edit.steps)) return null;
+  const safety: Safety = v.safety === "safe" ? "safe" : "needs-review";
+  const safetyReasons = isStrArr(v.safetyReasons) ? v.safetyReasons : [];
+  const usage = typeof v.usage === "string" ? v.usage : "unknown";
+  const cleanEdit: WinEdit = {
+    summary: edit.summary,
+    steps: edit.steps,
+    verify: typeof edit.verify === "string" ? edit.verify : "",
+    replacementImport: typeof edit.replacementImport === "string" ? edit.replacementImport : undefined,
+    originalImport: typeof edit.originalImport === "string" ? edit.originalImport : undefined,
+  };
   const loc = isObj(v.loc) && isNum(v.loc.line) && isNum(v.loc.column) ? (v.loc as Win["loc"]) : undefined;
   return {
     ...(v as unknown as Win),
+    safety,
+    safetyReasons,
+    usage,
+    routes,
+    edit: cleanEdit,
     loc,
     byteSource: v.byteSource === "measured" ? "measured" : "estimated",
   };
 }
 
-/** Validate a parsed wins.json; drops malformed wins/routes, throws if the envelope is wrong. */
+/** Validate a parsed wins.json; tolerates missing optional fields, drops unrecoverable wins (counted in droppedWins), throws if the envelope is wrong. */
 export function parseWinsReport(parsed: unknown): WinsReport {
   if (!isObj(parsed) || !Array.isArray(parsed.wins) || !Array.isArray(parsed.routes)) {
     throw new Error("JSON must be a wimb WinsReport (wins.json)");
@@ -73,7 +89,8 @@ export function parseWinsReport(parsed: unknown): WinsReport {
   );
   const wins = parsed.wins.map(parseWin).filter((w): w is Win => w !== null);
   return {
-    version: "2",
+    version: typeof parsed.version === "string" ? parsed.version : "unknown",
+    droppedWins: parsed.wins.length - wins.length,
     timestamp: typeof parsed.timestamp === "string" ? parsed.timestamp : "",
     projectRoot: typeof parsed.projectRoot === "string" ? parsed.projectRoot : "",
     byteSource: parsed.byteSource === "measured" ? "measured" : "estimated",

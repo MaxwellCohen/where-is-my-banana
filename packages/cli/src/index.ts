@@ -80,7 +80,7 @@ const scanCommand = defineCommand({
       exitThreshold,
       forestCompact: args["forest-compact"] || args["no-ast"],
     });
-    process.exit(code);
+    process.stdout.write("", () => process.exit(code));
   },
 });
 
@@ -225,7 +225,8 @@ const winsCommand = defineCommand({
     }
     const violations = checkBudget(report, { routeBudgetBytes, maxSafeWinBytes });
     for (const v of violations) console.error(`wimb: ${v.message}`);
-    process.exit(violations.length ? 1 : 0);
+    const exitCode = violations.length ? 1 : 0;
+    process.stdout.write("", () => process.exit(exitCode));
   },
 });
 

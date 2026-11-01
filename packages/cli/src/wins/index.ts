@@ -6,7 +6,7 @@ import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
 import { buildGraphFromVite, isViteProject } from "../sources/vite.js";
-import { runNext } from "./next-cli.js";
+import { assertNextAnalyzeSupport, runNext } from "./next-cli.js";
 import { attributeRoutes } from "./attribute.js";
 import { classifyWins, detectFramework } from "./classify.js";
 import type { WinsReport } from "./types.js";
@@ -27,13 +27,19 @@ const NO_DATA_HINT = "Run 'next analyze' (Next 16.4+) in the project first, or p
 const NO_ATTRIBUTION_MESSAGE = `No client bytes could be attributed to any route. ${NO_DATA_HINT}`;
 
 function exportJsonl(projectRoot: string, distDir: string, snapshot?: string): Promise<string> {
+  assertNextAnalyzeSupport(projectRoot);
   const args = ["analyze", "export", "--dist-dir", distDir];
   if (snapshot) args.push("--snapshot", snapshot);
   return runNext(projectRoot, args, { capture: true, env: { TURBOPACK: "1" } });
 }
 
 export async function runNextAnalyze(projectRoot: string, snapshot: string): Promise<void> {
-  await runNext(projectRoot, ["analyze", "--output", "--snapshot", snapshot]);
+  assertNextAnalyzeSupport(projectRoot);
+  try {
+    await runNext(projectRoot, ["analyze", "--output", "--snapshot", snapshot]);
+  } catch (e) {
+    throw new Error(`${(e as Error).message}\nIf this Next version predates 'next analyze' (e.g. early 16.4 canaries), upgrade to 16.4.0+.`);
+  }
 }
 
 async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {

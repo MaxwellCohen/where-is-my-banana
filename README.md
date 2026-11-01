@@ -19,7 +19,7 @@ Outputs `.wimb/wins.json` (machine) and `.wimb/wins.md` (human). Add `.wimb/` to
 
 Useful flags: `--top 20`, `--min-bytes 5000`, `--snapshot wins`, `--analyze-export graph.jsonl` (use a file you exported yourself: `npx next analyze export > graph.jsonl`).
 
-Older Next (16.1-16.3): step 1 is `npx next experimental-analyze --output`; `wimb wins` reads the binary artifacts it writes.
+Older Next (16.1-16.3): `wimb wins` needs Next 16.4+; use `wimb scan` instead.
 
 Track progress between runs:
 
@@ -45,15 +45,9 @@ pnpm install && pnpm build
 node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
 ```
 
-### Maintainers: refresh the `npx` branch
+### Maintainers: releasing
 
-The GitHub command runs the orphan `npx` branch, which must be rebuilt after changes:
-
-```bash
-pnpm install && pnpm pack:npx:push   # rebuilds and force-pushes origin/npx
-```
-
-Pushing to a non-default remote (`WIMB_NPX_REMOTE`) additionally requires `--force-remote`.
+Bump `packages/cli/package.json` version on `main`, then push a matching tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The `release` workflow verifies the tag matches the version and is on `main`, runs build, tests and `lint:pkg`, then publishes `@maxwellcohen/wimb` to npm (trusted publishing).
 
 ## Sample output
 
