@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { rankImporters } from "@/lib/importers";
 import { loadGraphFromFile } from "@/lib/load-graph";
+import { loadLaunchPayloadFromHash } from "@/lib/url-payload";
 import type { BundleSide, VizGraph, VizSide } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
 import { TreeNodeRow, collectHitAncestors } from "./TreeNodeRow";
@@ -115,6 +116,29 @@ export function VisualizerApp() {
       setSelected(nextBundle.routes[0].route);
     }
   }
+
+  useEffect(() => {
+    if (!window.location.hash) return;
+    const id = ++uploadId.current;
+    setBusy(true);
+    loadLaunchPayloadFromHash(window.location.hash)
+      .then((p) => {
+        if (!p || id !== uploadId.current) return;
+        if (p.graph) {
+          setGraph(p.graph);
+          setSelected(sideBundle(p.graph, "client").routes[0]?.route ?? "/");
+        }
+        setWins(p.wins ?? null);
+        // Drop the (possibly huge) data from the address bar once loaded.
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      })
+      .catch((err) => {
+        if (id === uploadId.current) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (id === uploadId.current) setBusy(false);
+      });
+  }, []);
 
   async function onUpload(file: File | null) {
     if (!file) return;

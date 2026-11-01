@@ -7,6 +7,7 @@ import type { ParsedGraph } from "@wimb/graph-v1";
 import { writeVizGraph, writeVizFile } from "./viz.js";
 import { readFileSync } from "node:fs";
 import { FlagError, parseExitThreshold, parseFormats, parseNumberFlag, validateWinsReport } from "./index-flags.js";
+import { DEFAULT_VISUALIZER_URL, buildPayload, inlineUrl, launchBrowser, serveOnce } from "./open.js";
 import { runWins, runNextAnalyze } from "./wins/index.js";
 import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
@@ -241,9 +242,35 @@ const winsCommand = defineCommand({
   },
 });
 
+const openCommand = defineCommand({
+  meta: { name: "open", description: "Open the visualizer in a browser pre-loaded with .wimb/ data (no file picking)" },
+  args: {
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    url: { type: "string", description: "Visualizer base URL", default: DEFAULT_VISUALIZER_URL },
+    "no-launch": { type: "boolean", description: "Print the URL instead of opening a browser", default: false },
+  },
+  async run({ args }) {
+    try {
+      const gz = buildPayload(resolve(args.cwd));
+      const inline = inlineUrl(args.url, gz);
+      if (inline) {
+        console.log(inline.length > 2000 ? `wimb: opening visualizer (${(inline.length / 1024).toFixed(0)} KB link)` : `wimb: ${inline}`);
+        if (!args["no-launch"]) launchBrowser(inline);
+        return;
+      }
+      await serveOnce(gz, args.url, (url) => {
+        console.log(`wimb: serving data on localhost until the page loads it (2 min max)\nwimb: ${url}`);
+        if (!args["no-launch"]) launchBrowser(url);
+      });
+    } catch (err) {
+      fail(err);
+    }
+  },
+});
+
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, open: openCommand },
 });
 
 runMain(main);

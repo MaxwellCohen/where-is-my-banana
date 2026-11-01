@@ -4,7 +4,11 @@
 
 WIMB finds the import edges ("wins") that, if cut or made lazy, shrink your Next.js App Router first-load client JS the most, and tells an agent exactly how to cut them.
 
-## Quick start (run from GitHub)
+## Quick start (use the prompt)
+
+Easiest path: open **https://wimb-visualizer.vercel.app/**, copy the prompt, and paste it into your coding agent (Claude Code, Cursor, etc.) from your app's root. The agent runs WIMB and applies the fixes for you.
+
+## Manual quick start (run from GitHub)
 
 Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack).
 
@@ -20,6 +24,14 @@ Outputs `.wimb/wins.json` (machine) and `.wimb/wins.md` (human). Add `.wimb/` to
 Useful flags: `--top 20`, `--min-bytes 5000`, `--snapshot wins`, `--analyze-export graph.jsonl` (use a file you exported yourself: `npx next analyze export > graph.jsonl`).
 
 Older Next (16.1-16.3): `wimb wins` needs Next 16.4+; use `wimb scan` instead.
+
+Open the visualizer pre-loaded with your results (no file picking):
+
+```bash
+npx @maxwellcohen/wimb open
+```
+
+Small graphs travel gzip-compressed in the URL fragment (never sent to a server); larger ones are served once from `127.0.0.1` and fetched by the page. Use `--no-launch` to just print the URL. Safari blocks the localhost fetch; use Chrome/Firefox or the file picker.
 
 Track progress between runs:
 
