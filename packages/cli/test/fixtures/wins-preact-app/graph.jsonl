@@ -1,0 +1,8 @@
+{"type":"meta","schema_version":1,"snapshot_name":"wins-preact-app","module_index_hash":"x","route_count":1,"selected_routes":1}
+{"type":"module","ident":"[project]/src/main.tsx (ecmascript)","path":"[project]/src/main.tsx","dependencies":{"sync":["[project]/src/HeavyChart.tsx (ecmascript)","[project]/src/Modal.tsx (ecmascript)"],"async":[],"traced":[]}}
+{"type":"module","ident":"[project]/src/HeavyChart.tsx (ecmascript)","path":"[project]/src/HeavyChart.tsx","dependencies":{"sync":[],"async":[],"traced":[]}}
+{"type":"module","ident":"[project]/src/Modal.tsx (ecmascript)","path":"[project]/src/Modal.tsx","dependencies":{"sync":[],"async":[],"traced":[]}}
+{"type":"route","route":"/","entries":[{"route_entry_id":"/","module_ident":"[project]/src/main.tsx (ecmascript)","module_path":"[project]/src/main.tsx","role":"route","entry_kind":"client_bootstrap"}],"coverage":{"entries":"exact","groups":"exact"}}
+{"type":"part","route":"/","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/src/main.tsx","size":5400,"compressed_size":1800}
+{"type":"part","route":"/","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/src/HeavyChart.tsx","size":270000,"compressed_size":90000}
+{"type":"part","route":"/","filename":"[client-fs]/static/chunks/main.js","source_path":"[project]/src/Modal.tsx","size":120000,"compressed_size":40000}

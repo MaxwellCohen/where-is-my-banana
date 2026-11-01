@@ -117,7 +117,7 @@ const LAZY_IMPORT: Partial<Record<Framework, string>> = {
 function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
   return u.bindings.map((b) => {
     const spec = `'${u.specifier}'`;
-    if (b.kind === "namespace" && fw !== "next" && fw !== "svelte" && fw !== "generic")
+    if (b.kind === "namespace")
       return `const ${b.local} = await import(${spec}); // namespace import: use inside an async function/effect/handler, not as a component`;
     const named = b.kind === "named" ? (isIdent(b.imported) ? `m.${b.imported}` : `m["${b.imported}"]`) : null;
     if (fw === "next") {

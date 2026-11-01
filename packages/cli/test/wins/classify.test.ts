@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { classifyWins } from "../../src/wins/classify.js";
+import { classifyWins, detectFramework } from "../../src/wins/classify.js";
 import type { RouteAttribution } from "../../src/wins/types.js";
 
 let root: string;
@@ -140,5 +140,73 @@ describe("classifyWins", () => {
     expect(merged.routes).toEqual({ "/x": 20000, "/y": 30000 });
     expect(merged.totalSavedBytes).toBe(30000);
     expect(wins[0]!.safetyReasons).toContain("unresolved-usage");
+  });
+});
+
+describe("detectFramework", () => {
+  const proj = (pkg: object) => {
+    const d = mkdtempSync(join(tmpdir(), "wins-fw-"));
+    writeFileSync(join(d, "package.json"), JSON.stringify(pkg));
+    return d;
+  };
+  const all = ["preact", "react", "svelte", "vue", "solid-js", "next"];
+
+  it("preact-only -> preact", () => {
+    expect(detectFramework(proj({ dependencies: { preact: "^10" } }))).toBe("preact");
+  });
+
+  it("precedence next > solid > vue > svelte > react > preact", () => {
+    const order = [["next", "next"], ["solid-js", "solid"], ["vue", "vue"], ["svelte", "svelte"], ["react", "react"], ["preact", "preact"]] as const;
+    for (let i = 0; i < order.length; i++) {
+      const deps = Object.fromEntries(order.slice(i).map(([d]) => [d, "1"]));
+      expect(detectFramework(proj({ dependencies: deps }))).toBe(order[i]![1]);
+    }
+    expect(all).toHaveLength(order.length);
+  });
+
+  it("dependencies beat devDependencies; devDependencies used as fallback", () => {
+    expect(detectFramework(proj({ dependencies: { preact: "1" }, devDependencies: { next: "1" } }))).toBe("preact");
+    expect(detectFramework(proj({ devDependencies: { vue: "1", react: "1" } }))).toBe("vue");
+    expect(detectFramework(proj({}))).toBe("generic");
+  });
+});
+
+describe("classifyWins framework output", () => {
+  it("preact -> lazy from preact/compat", async () => {
+    const preactRoot = mkdtempSync(join(tmpdir(), "wins-preact-"));
+    writeFileSync(join(preactRoot, "package.json"), JSON.stringify({ dependencies: { preact: "^10" } }));
+    for (const f of ["app/cond/page.tsx", "components/Chart.tsx"]) {
+      mkdirSync(dirname(join(preactRoot, f)), { recursive: true });
+      writeFileSync(join(preactRoot, f), readFileSync(join(root, f)));
+    }
+    const [w] = await classifyWins([attr("/cond", "app/cond/page.tsx", "components/Chart.tsx", 20000)], {
+      projectRoot: preactRoot,
+      byteSource: "measured",
+      framework: detectFramework(preactRoot),
+    });
+    expect(w!.edit.replacementImport).toContain("import { lazy } from 'preact/compat';");
+    expect(w!.edit.replacementImport).toContain("lazy(() => import(");
+    rmSync(preactRoot, { recursive: true, force: true });
+  });
+
+  it("namespace import -> await import, never lazy()/dynamic(), unresolved-usage", async () => {
+    write(
+      "app/ns/page.tsx",
+      `"use client";
+import * as Icons from "lib";
+export default function P({ n }: { n: string }) { return <main>{(Icons as any)[n]}</main>; }`,
+    );
+    for (const framework of ["next", "react", "preact", "vue", "solid", "svelte", "generic"] as const) {
+      const [w] = await classifyWins([attr("/ns", "app/ns/page.tsx", "node_modules/lib/index.js", 50000, "lib")], {
+        projectRoot: root,
+        byteSource: "measured",
+        framework,
+      });
+      expect(w!.fixKind).toBe("lazy");
+      expect(w!.edit.replacementImport).toContain("const Icons = await import('lib');");
+      expect(w!.edit.replacementImport).not.toMatch(/lazy\(|dynamic\(|defineAsyncComponent\(/);
+      expect(w!.safety).toBe("needs-review");
+      expect(w!.safetyReasons).toContain("unresolved-usage");
+    }
   });
 });
