@@ -24,4 +24,7 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter @maxwellcohen/wimb lint:pkg
-      - run: pnpm --filter @maxwellcohen/wimb publish --no-git-checks
+      - name: Stage publish (approve on npmjs.com with 2FA)
+        run: |
+          npm install -g npm@^11.15.0
+          cd packages/cli && npm stage publish
