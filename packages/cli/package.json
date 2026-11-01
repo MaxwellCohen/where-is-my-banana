@@ -1,6 +1,6 @@
 {
   "name": "@maxwellcohen/wimb",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Find the import edges that, if cut or made lazy, shrink your first-load client JS the most (Next.js, Vite).",
   "license": "MIT",
   "author": "Maxwell Cohen",
@@ -44,7 +44,7 @@
     "dev": "tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "pnpm --filter @wimb/graph-v1 build && tsdown",
+    "prepack": "pnpm --filter @wimb/graph-v1 build && tsdown && cp ../../README.md README.md",
     "lint:pkg": "publint"
   },
   "dependencies": {
