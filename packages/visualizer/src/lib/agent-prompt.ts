@@ -1,8 +1,7 @@
 /** Agent prompt that captures a Next.js analyze graph and loads it into this visualizer. */
 export function buildAgentPrompt(visualizerUrl: string): string {
   const url = visualizerUrl.replace(/\/$/, "");
-  return `Reduce this project's first-load client JS (Next.js 16+ or Vite). Do not upgrade \`next\`.
-
+  return `Reduce this project's first-load client JS (Next.js 16+ or Vite).
 1. From the project root (Node >= 20), measure and rank the wins. It auto-detects Next/Vite and writes \`.wimb/\` (add it to .gitignore):
 
 \`\`\`bash

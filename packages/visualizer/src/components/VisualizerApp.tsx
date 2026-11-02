@@ -161,6 +161,21 @@ export function VisualizerApp() {
     }
   }
 
+  async function onFolder(files: FileList | null) {
+    if (!files?.length) return;
+    // Top-level files of the picked folder only (webkitRelativePath = "<dir>/<name>").
+    const top = (name: string) =>
+      Array.from(files).find((f) => f.webkitRelativePath.split("/").length === 2 && f.name === name);
+    const graphFile = top("bundle-graph.json");
+    if (!graphFile) {
+      setError("No bundle-graph.json in that folder. Pick the .wimb folder (run `wimb wins` first).");
+      return;
+    }
+    await onUpload(graphFile);
+    const winsFile = top("wins.json");
+    if (winsFile) await onWins(winsFile);
+  }
+
   async function onWins(file: File | null) {
     if (!file) return;
     const id = ++winsId.current;
@@ -199,17 +214,30 @@ export function VisualizerApp() {
 
   return (
     <div className="shell">
-      <header className="hero">
+      <header className={graph ? "hero compact" : "hero"}>
         <p className="brand">Where Is My Banana</p>
-        <h1>Bundle forest</h1>
-        <p className="lede">
+        {graph ? null : <h1>Bundle forest</h1>}
+        {graph ? null : <p className="lede">
           See which of <em>your</em> files pull the most into a route. Copy the agent prompt, build a
           forest locally, then open the JSON here — parsed in this browser only.
-        </p>
+        </p>}
         <div className="upload">
-          <CopyPromptButton />
+          {graph ? null : <CopyPromptButton />}
+          <label className="upload-btn" title="On macOS press Cmd+Shift+. in the dialog to show hidden folders">
+            Open .wimb folder
+            <input
+              type="file"
+              disabled={busy}
+              {...{ webkitdirectory: "" }}
+              onChange={(e) => {
+                const input = e.currentTarget;
+                void onFolder(input.files);
+                input.value = "";
+              }}
+            />
+          </label>
           <label className="upload-btn">
-            {busy ? "Parsing…" : "Open local file"}
+            {busy ? "Parsing…" : "Open bundle-graph.json"}
             <input
               type="file"
               accept=".jsonl,.gz,.json,.jsonl.gz"
@@ -221,6 +249,7 @@ export function VisualizerApp() {
               }}
             />
           </label>
+
           <label className="upload-btn">
             {wins ? `wins.json (${wins.wins.length})` : "Open wins.json"}
             <input
@@ -236,10 +265,10 @@ export function VisualizerApp() {
           <span className="meta">
             {graph
               ? `snapshot ${graph.meta.snapshotName ?? "local"} · ${bundle.routes.length} routes · ${side}`
-              : "waiting for a local file"}
+              : "waiting for a graph"}
           </span>
         </div>
-        <p className="privacy">Nothing is uploaded or stored on the server. Graphs never leave your device.</p>
+        {graph ? null : <p className="privacy">Nothing is uploaded or stored on the server. Graphs never leave your device.</p>}
         {error ? <p className="error" role="alert">{error}</p> : null}
 
         {graph ? (
@@ -298,7 +327,7 @@ export function VisualizerApp() {
       {!graph ? (
         <p className="empty empty-hero">
           No graph loaded. Use <strong>Copy prompt</strong> in your editor, then{" "}
-          <strong>Open local file</strong> with <code>.wimb/bundle-graph.json</code>.
+          <strong>Open .wimb folder</strong> (or <strong>Open bundle-graph.json</strong>) to load <code>.wimb/bundle-graph.json</code>.
         </p>
       ) : (
         <div className="layout">
