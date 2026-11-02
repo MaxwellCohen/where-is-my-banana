@@ -4,6 +4,7 @@ import { join, relative, isAbsolute } from "node:path";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { normalizeModulePath } from "@wimb/graph-v1";
+import { classifyRouteChunk, routeForTanstackFile, type RouteFile } from "./route-files.js";
 import type { GraphModule, GraphRoute, ParsedGraph } from "@wimb/graph-v1";
 
 interface ViteChunk {
@@ -31,6 +32,8 @@ interface ViteApi {
   build(config: Record<string, unknown>): Promise<unknown>;
 }
 
+export { routeForTanstackFile };
+
 /** Route path for an entry chunk, derived from its facade module (project-relative) so same-named entries don't collide. */
 export function routeForEntry(facadeRel: string, fallbackName: string): string {
   if (!facadeRel) return `/${fallbackName}`;
@@ -38,31 +41,6 @@ export function routeForEntry(facadeRel: string, fallbackName: string): string {
   const isHtml = /\.html?$/.test(facadeRel);
   const trimmed = isHtml ? noExt.replace(/(^|\/)index$/, "") : noExt;
   return `/${trimmed}`;
-}
-
-function tanstackSplitId(c: ViteChunk): string | null {
-  if (c.facadeModuleId?.includes("?tsr-split=")) return c.facadeModuleId;
-  return Object.keys(c.modules).find((id) => id.includes("?tsr-split=")) ?? null;
-}
-
-/** Project-relative TanStack Router route file -> URL pattern, or null for layouts/root/ignored files. */
-export function routeForTanstackFile(rel: string): string | null {
-  const noExt = rel.split("?")[0].replace(/\.[^./]+$/, "");
-  const idx = noExt.lastIndexOf("routes/");
-  const within = idx >= 0 ? noExt.slice(idx + "routes/".length) : noExt;
-  const parts = within.split("/").flatMap((p) => (p.startsWith("-") ? [p] : p.split(".")));
-  if (parts.some((p) => p.startsWith("-") || p === "__root")) return null;
-  const last = parts[parts.length - 1];
-  if (last === "route" || (last.startsWith("_") && !last.startsWith("__"))) return null;
-  const segs: string[] = [];
-  for (const raw of parts) {
-    if (raw === "index" || /^\(.*\)$/.test(raw) || raw.startsWith("_")) continue;
-    const seg = raw.replace(/_$/, "");
-    if (seg === "$") segs.push("[...slug]");
-    else if (seg.startsWith("$")) segs.push(`[${seg.slice(1)}]`);
-    else segs.push(seg);
-  }
-  return `/${segs.join("/")}`;
 }
 
 export function isViteProject(projectRoot: string): boolean {
@@ -197,33 +175,41 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   };
 
   const entries = chunks.filter((c) => c.isEntry);
-  // TanStack Router (Start) code-splits each route into `<file>?tsr-split=*` chunks lazily imported from a single entry.
-  const splitChunks = new Map<string, ViteChunk[]>();
+  // Framework routers (TanStack, SvelteKit, SolidStart) lazy-load each route file from a few entries, so the real
+  // routes are the lazy route chunks. First-load = non-route entries + the route's chunk + its layout chunks.
+  const routeChunks = new Map<ViteChunk, RouteFile>();
   for (const c of chunks) {
-    const id = tanstackSplitId(c);
-    const route = id && routeForTanstackFile(modulePath(projectRoot, id));
-    if (!id || !route) continue;
-    const key = `${route}\0${modulePath(projectRoot, id)}`;
-    splitChunks.set(key, [...(splitChunks.get(key) ?? []), c]);
+    const ids = [c.facadeModuleId, ...Object.keys(c.modules)].filter((x): x is string => !!x);
+    for (const id of ids) {
+      const f = classifyRouteChunk(id, modulePath(projectRoot, id));
+      if (f) {
+        routeChunks.set(c, f);
+        break;
+      }
+    }
   }
-  if (splitChunks.size) {
-    const base = partsOf(entries);
+  const pages = [...routeChunks].filter(([, f]) => f.kind === "page");
+  if (pages.length) {
+    const base = partsOf(entries.filter((c) => !routeChunks.has(c)));
+    const layouts = [...routeChunks].filter(([, f]) => f.kind === "layout");
     const grouped = new Map<string, { facade: string; chunks: ViteChunk[] }>();
-    for (const [key, cs] of splitChunks) {
-      const [route, facade] = key.split("\0");
-      const g = grouped.get(route) ?? { facade, chunks: [] };
-      g.chunks.push(...cs);
-      grouped.set(route, g);
+    for (const [c, f] of pages) {
+      if (f.kind !== "page") continue;
+      const g = grouped.get(f.route) ?? { facade: f.file, chunks: [] };
+      g.chunks.push(c);
+      for (const [lc, lf] of layouts) if (lf.kind === "layout" && (f.dir === lf.dir || f.dir.startsWith(`${lf.dir}/`))) g.chunks.push(lc);
+      grouped.set(f.route, g);
     }
     for (const [route, g] of grouped) {
-      const parts = partsOf([...entries, ...g.chunks]);
-      addRoute(route, g.facade, parts);
+      addRoute(route, g.facade, partsOf([...entries.filter((c) => !routeChunks.has(c)), ...g.chunks]));
     }
-    // Unsplit route files bundled into the entry itself load with the entry.
-    for (const id of base.keys()) {
-      if (!/(^|\/)routes\//.test(id) || !/\.[jt]sx?$/.test(id)) continue;
-      const route = routeForTanstackFile(id);
-      if (route && !routes.has(route)) addRoute(route, id, base);
+    // Unsplit TanStack route files bundled into the entry itself load with the entry.
+    if (pages.some(([, f]) => f.kind === "page" && f.framework === "tanstack")) {
+      for (const id of base.keys()) {
+        if (!/(^|\/)routes\//.test(id) || !/\.[jt]sx?$/.test(id)) continue;
+        const route = routeForTanstackFile(id);
+        if (route && !routes.has(route)) addRoute(route, id, base);
+      }
     }
     return finish();
   }

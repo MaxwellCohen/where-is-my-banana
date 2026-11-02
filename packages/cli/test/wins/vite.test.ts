@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { classifyRouteChunk } from "../../src/sources/route-files.js";
 import { buildGraphFromVite, isViteProject, routeForEntry, routeForTanstackFile } from "../../src/sources/vite.js";
 
 function project(pkg: object): string {
@@ -56,5 +57,26 @@ describe("buildGraphFromVite with TanStack route splitting", () => {
     expect(graph.clientPartsByRoute.get("/")!.has("src/heavy.ts")).toBe(true);
     expect(graph.clientPartsByRoute.get("/about")!.has("src/heavy.ts")).toBe(false);
     expect(size("/")).toBeGreaterThan(size("/about"));
+  });
+});
+
+describe("classifyRouteChunk", () => {
+  it("recognises SvelteKit pages, layouts and error pages", () => {
+    expect(classifyRouteChunk("/p/src/routes/+page.svelte", "src/routes/+page.svelte")).toMatchObject({ kind: "page", route: "/" });
+    expect(classifyRouteChunk("/p/src/routes/(app)/[id]/+page.svelte", "src/routes/(app)/[id]/+page.svelte")).toMatchObject({
+      kind: "page",
+      route: "/[id]",
+    });
+    expect(classifyRouteChunk("/p/src/routes/+layout.svelte", "src/routes/+layout.svelte")).toMatchObject({ kind: "layout", dir: "src/routes" });
+    expect(classifyRouteChunk("/p/src/routes/+error.svelte", "src/routes/+error.svelte")).toMatchObject({ kind: "skip" });
+  });
+  it("recognises SolidStart picked route files", () => {
+    expect(classifyRouteChunk("/p/src/routes/index.tsx?pick=default", "src/routes/index.tsx")).toMatchObject({ kind: "page", route: "/" });
+    expect(classifyRouteChunk("/p/src/routes/blog/[slug].tsx?pick=default", "src/routes/blog/[slug].tsx")).toMatchObject({
+      route: "/blog/[slug]",
+    });
+  });
+  it("ignores ordinary modules", () => {
+    expect(classifyRouteChunk("/p/src/lib/a.ts", "src/lib/a.ts")).toBeNull();
   });
 });
