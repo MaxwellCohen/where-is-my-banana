@@ -31,10 +31,10 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
+    "@types/node": "^26.6.6",
     "tsdown": "^0.23.4",
-    "typescript": "^5.8.0",
-    "vitest": "^3.1.0"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   },
   "private": true
 }
