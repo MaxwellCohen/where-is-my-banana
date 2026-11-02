@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { classifyRouteChunk } from "../../src/sources/route-files.js";
+import { classifyRouteChunk, readPrachtRoutes } from "../../src/sources/route-files.js";
 import { buildGraphFromVite, isViteProject, routeForEntry, routeForTanstackFile } from "../../src/sources/vite.js";
 
 function project(pkg: object): string {
@@ -78,5 +78,18 @@ describe("classifyRouteChunk", () => {
   });
   it("ignores ordinary modules", () => {
     expect(classifyRouteChunk("/p/src/lib/a.ts", "src/lib/a.ts")).toBeNull();
+  });
+});
+
+describe("Pracht routes", () => {
+  it("reads URLs from the route table and treats shells as layouts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wimb-pracht-"));
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src/routes.ts"), "route('/', './routes/home.tsx', {}), route('/:id', './routes/book.tsx')");
+    const table = readPrachtRoutes(dir)!;
+    const lookup = (rel: string) => table.get(rel);
+    expect(classifyRouteChunk("/p/src/routes/book.tsx?pracht-client", "src/routes/book.tsx", lookup)).toMatchObject({ kind: "page", route: "/[id]" });
+    expect(classifyRouteChunk("/p/src/routes/not-found.tsx?pracht-client", "src/routes/not-found.tsx", lookup)).toMatchObject({ kind: "skip" });
+    expect(classifyRouteChunk("/p/src/shells/public.tsx?pracht-client", "src/shells/public.tsx", lookup)).toMatchObject({ kind: "layout" });
   });
 });

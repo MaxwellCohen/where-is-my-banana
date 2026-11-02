@@ -4,7 +4,7 @@ import { join, relative, isAbsolute } from "node:path";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { normalizeModulePath } from "@wimb/graph-v1";
-import { classifyRouteChunk, routeForTanstackFile, type RouteFile } from "./route-files.js";
+import { classifyRouteChunk, readPrachtRoutes, routeForTanstackFile, type RouteFile } from "./route-files.js";
 import type { GraphModule, GraphRoute, ParsedGraph } from "@wimb/graph-v1";
 
 interface ViteChunk {
@@ -41,6 +41,17 @@ export function routeForEntry(facadeRel: string, fallbackName: string): string {
   const isHtml = /\.html?$/.test(facadeRel);
   const trimmed = isHtml ? noExt.replace(/(^|\/)index$/, "") : noExt;
   return `/${trimmed}`;
+}
+
+/** Frameworks whose client build has no index.html and sets its own virtual input (their CLI wraps `vite build`). */
+function clientInput(projectRoot: string): { rollupOptions?: { input: string } } {
+  if (existsSync(join(projectRoot, "index.html"))) return {};
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps["@pracht/vite-plugin"]) return { rollupOptions: { input: "virtual:pracht/client" } };
+  } catch {}
+  return {};
 }
 
 export function isViteProject(projectRoot: string): boolean {
@@ -100,7 +111,7 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
     mode: "production",
     logLevel: "warn",
     plugins: [plugin],
-    build: { write: false, emptyOutDir: false, reportCompressedSize: false, watch: null },
+    build: { write: false, emptyOutDir: false, reportCompressedSize: false, watch: null, ...clientInput(projectRoot) },
   });
 
   const modules = new Map<string, GraphModule>();
@@ -177,11 +188,13 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   const entries = chunks.filter((c) => c.isEntry);
   // Framework routers (TanStack, SvelteKit, SolidStart) lazy-load each route file from a few entries, so the real
   // routes are the lazy route chunks. First-load = non-route entries + the route's chunk + its layout chunks.
+  const prachtTable = readPrachtRoutes(projectRoot);
+  const prachtUrlFor = prachtTable && ((rel: string) => prachtTable.get(rel));
   const routeChunks = new Map<ViteChunk, RouteFile>();
   for (const c of chunks) {
     const ids = [c.facadeModuleId, ...Object.keys(c.modules)].filter((x): x is string => !!x);
     for (const id of ids) {
-      const f = classifyRouteChunk(id, modulePath(projectRoot, id));
+      const f = classifyRouteChunk(id, modulePath(projectRoot, id), prachtUrlFor);
       if (f) {
         routeChunks.set(c, f);
         break;
@@ -197,7 +210,7 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
       if (f.kind !== "page") continue;
       const g = grouped.get(f.route) ?? { facade: f.file, chunks: [] };
       g.chunks.push(c);
-      for (const [lc, lf] of layouts) if (lf.kind === "layout" && (f.dir === lf.dir || f.dir.startsWith(`${lf.dir}/`))) g.chunks.push(lc);
+      for (const [lc, lf] of layouts) if (lf.kind === "layout" && (lf.dir === "" || f.dir === lf.dir || f.dir.startsWith(`${lf.dir}/`))) g.chunks.push(lc);
       grouped.set(f.route, g);
     }
     for (const [route, g] of grouped) {

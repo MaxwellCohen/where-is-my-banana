@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { normalizeModulePath } from "@wimb/graph-v1";
+
 /** A route-file module recognised in a lazily loaded bundler chunk. */
 export type RouteFile =
   | { kind: "page"; framework: string; route: string; dir: string; file: string }
@@ -39,7 +43,14 @@ function splitAfterRoutes(rel: string): { dir: string; rest: string[] } | null {
  * Classifies a module of a bundled chunk as a lazily loaded route file.
  * `raw` is the bundler id (with query); `rel` is the project-relative path without query.
  */
-export function classifyRouteChunk(raw: string, rel: string): RouteFile | null {
+export function classifyRouteChunk(raw: string, rel: string, prachtUrlFor?: (rel: string) => string | undefined): RouteFile | null {
+  // Pracht: `src/routes/x.tsx?pracht-client`; URLs live in the app's route table, shells wrap routes.
+  if (raw.includes("?pracht-client")) {
+    if (/(^|\/)shells\//.test(rel)) return { kind: "layout", framework: "pracht", dir: "" };
+    const url = prachtUrlFor?.(rel);
+    if (url) return { kind: "page", framework: "pracht", route: url, dir: "", file: rel };
+    return prachtUrlFor ? { kind: "skip", framework: "pracht" } : { kind: "page", framework: "pracht", route: dirRoute([rel.replace(/^.*routes\//, "").replace(/\.[^./]+$/, "")]), dir: "", file: rel };
+  }
   // TanStack Router auto code-splitting: `routes/x.tsx?tsr-split=component`.
   if (raw.includes("?tsr-split=")) {
     const route = routeForTanstackFile(rel);
@@ -59,4 +70,18 @@ export function classifyRouteChunk(raw: string, rel: string): RouteFile | null {
     return r ? { kind: "page", framework: "solid-start", route: dirRoute(r.rest), dir: "", file: rel } : null;
   }
   return null;
+}
+
+/** Best-effort `route('/path', './routes/file.tsx')` table from a Pracht app's route manifest, keyed by project-relative file. */
+export function readPrachtRoutes(projectRoot: string): Map<string, string> | undefined {
+  for (const f of ["src/routes.ts", "src/pracht-routes.ts"]) {
+    const abs = join(projectRoot, f);
+    if (!existsSync(abs)) continue;
+    const table = new Map<string, string>();
+    for (const m of readFileSync(abs, "utf-8").matchAll(/route\(\s*['"]([^'"]*)['"]\s*,\s*['"]\.\/([^'"]+)['"]/g)) {
+      table.set(normalizeModulePath(`src/${m[2]}`), m[1].replace(/:(\w+)/g, "[$1]") || "/");
+    }
+    if (table.size) return table;
+  }
+  return undefined;
 }
