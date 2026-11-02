@@ -1,6 +1,6 @@
 {
   "name": "@maxwellcohen/wimb",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Find the import edges that, if cut or made lazy, shrink your first-load client JS the most (Next.js, Vite).",
   "license": "MIT",
   "author": "Maxwell Cohen",
