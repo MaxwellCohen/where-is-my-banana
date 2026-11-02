@@ -45,6 +45,10 @@ code {
   margin-bottom: 1.75rem;
 }
 
+.hero.compact {
+  margin-bottom: 0.75rem;
+}
+
 .brand {
   margin: 0;
   letter-spacing: 0.08em;
@@ -428,7 +432,7 @@ code {
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) 5.5rem 5.5rem 4rem;
   gap: 0.5rem;
-  padding: 0 0.5rem 0.55rem;
+  padding: 0 2rem 0.55rem 0.5rem;
   color: var(--muted);
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -445,13 +449,18 @@ code {
   overflow: auto;
 }
 
+.importer-list > li { position: relative; }
+.importer-copy { position: absolute; top: 0.45rem; right: 0.5rem; }
+.copy-path { margin-left: 0.35rem; padding: 0 0.3rem; font: inherit; font-size: 0.72rem; line-height: 1.3; background: transparent; color: var(--muted); border: 1px solid transparent; border-radius: 4px; cursor: pointer; opacity: 0.45; }
+.copy-path:hover, .copy-path:focus-visible { opacity: 1; color: var(--ink); border-color: var(--line); background: var(--bg2); }
+
 .importer-row {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) 5.5rem 5.5rem 4rem;
   gap: 0.5rem;
   align-items: center;
-  padding: 0.4rem 0.5rem;
+  padding: 0.4rem 2rem 0.4rem 0.5rem;
   border: 0;
   border-radius: 0.3rem;
   background: transparent;

@@ -4,6 +4,7 @@ import { join, relative, isAbsolute } from "node:path";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { normalizeModulePath } from "@wimb/graph-v1";
+import { classifyRouteChunk, readPrachtRoutes, routeForTanstackFile, type RouteFile } from "./route-files.js";
 import type { GraphModule, GraphRoute, ParsedGraph } from "@wimb/graph-v1";
 
 interface ViteChunk {
@@ -13,6 +14,7 @@ interface ViteChunk {
   facadeModuleId: string | null;
   isEntry: boolean;
   imports: string[];
+  dynamicImports: string[];
   fileName: string;
   modules: Record<string, { renderedLength: number }>;
 }
@@ -30,6 +32,8 @@ interface ViteApi {
   build(config: Record<string, unknown>): Promise<unknown>;
 }
 
+export { routeForTanstackFile };
+
 /** Route path for an entry chunk, derived from its facade module (project-relative) so same-named entries don't collide. */
 export function routeForEntry(facadeRel: string, fallbackName: string): string {
   if (!facadeRel) return `/${fallbackName}`;
@@ -37,6 +41,17 @@ export function routeForEntry(facadeRel: string, fallbackName: string): string {
   const isHtml = /\.html?$/.test(facadeRel);
   const trimmed = isHtml ? noExt.replace(/(^|\/)index$/, "") : noExt;
   return `/${trimmed}`;
+}
+
+/** Frameworks whose client build has no index.html and sets its own virtual input (their CLI wraps `vite build`). */
+function clientInput(projectRoot: string): { rollupOptions?: { input: string } } {
+  if (existsSync(join(projectRoot, "index.html"))) return {};
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf-8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (deps["@pracht/vite-plugin"]) return { rollupOptions: { input: "virtual:pracht/client" } };
+  } catch {}
+  return {};
 }
 
 export function isViteProject(projectRoot: string): boolean {
@@ -96,7 +111,7 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
     mode: "production",
     logLevel: "warn",
     plugins: [plugin],
-    build: { write: false, emptyOutDir: false, reportCompressedSize: false, watch: null },
+    build: { write: false, emptyOutDir: false, reportCompressedSize: false, watch: null, ...clientInput(projectRoot) },
   });
 
   const modules = new Map<string, GraphModule>();
@@ -126,10 +141,7 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
   const clientPartsByRoute = new Map<string, Map<string, number>>();
   const pathRouteUsage = new Map<string, Set<string>>();
   // Only static `imports` are followed below, so dynamic (lazy) chunks are excluded from first-load by design.
-  for (const entry of chunks.filter((c) => c.isEntry)) {
-    const facadeId = entry.facadeModuleId ? idOf(entry.facadeModuleId) : null;
-    let route = routeForEntry(facadeId ?? "", entry.name);
-    for (let n = 2; routes.has(route); n++) route = `${routeForEntry(facadeId ?? "", entry.name)}-${n}`;
+  const partsOf = (starts: ViteChunk[]): Map<string, number> => {
     const parts = new Map<string, number>();
     const seen = new Set<string>();
     const visit = (c: ViteChunk | undefined) => {
@@ -144,14 +156,16 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
       }
       for (const i of c.imports) visit(byFile.get(i));
     };
-    visit(entry);
+    starts.forEach(visit);
+    return parts;
+  };
+  const addRoute = (route: string, facade: string, parts: Map<string, number>) => {
     for (const p of parts.keys()) {
       ensure(p);
       let s = pathRouteUsage.get(p);
       if (!s) pathRouteUsage.set(p, (s = new Set()));
       s.add(route);
     }
-    const facade = facadeId || "";
     if (facade) ensure(facade);
     routes.set(route, {
       type: "route",
@@ -169,17 +183,68 @@ export async function buildGraphFromVite(projectRoot: string): Promise<ParsedGra
       coverage: { entries: "exact", groups: "unknown" },
     });
     clientPartsByRoute.set(route, new Map([...parts].map(([k, v]) => [k, Math.round(v)])));
-  }
-
-  return {
-    meta: null,
-    modules,
-    routes,
-    clientPartsByRoute,
-    serverPartsByRoute: new Map(),
-    pathRouteUsage,
-    serverPathRouteUsage: new Map(),
-    outputs: [],
-    groups: [],
   };
+
+  const entries = chunks.filter((c) => c.isEntry);
+  // Framework routers (TanStack, SvelteKit, SolidStart) lazy-load each route file from a few entries, so the real
+  // routes are the lazy route chunks. First-load = non-route entries + the route's chunk + its layout chunks.
+  const prachtTable = readPrachtRoutes(projectRoot);
+  const prachtUrlFor = prachtTable && ((rel: string) => prachtTable.get(rel));
+  const routeChunks = new Map<ViteChunk, RouteFile>();
+  for (const c of chunks) {
+    const ids = [c.facadeModuleId, ...Object.keys(c.modules)].filter((x): x is string => !!x);
+    for (const id of ids) {
+      const f = classifyRouteChunk(id, modulePath(projectRoot, id), prachtUrlFor);
+      if (f) {
+        routeChunks.set(c, f);
+        break;
+      }
+    }
+  }
+  const pages = [...routeChunks].filter(([, f]) => f.kind === "page");
+  if (pages.length) {
+    const base = partsOf(entries.filter((c) => !routeChunks.has(c)));
+    const layouts = [...routeChunks].filter(([, f]) => f.kind === "layout");
+    const grouped = new Map<string, { facade: string; chunks: ViteChunk[] }>();
+    for (const [c, f] of pages) {
+      if (f.kind !== "page") continue;
+      const g = grouped.get(f.route) ?? { facade: f.file, chunks: [] };
+      g.chunks.push(c);
+      for (const [lc, lf] of layouts) if (lf.kind === "layout" && (lf.dir === "" || f.dir === lf.dir || f.dir.startsWith(`${lf.dir}/`))) g.chunks.push(lc);
+      grouped.set(f.route, g);
+    }
+    for (const [route, g] of grouped) {
+      addRoute(route, g.facade, partsOf([...entries.filter((c) => !routeChunks.has(c)), ...g.chunks]));
+    }
+    // Unsplit TanStack route files bundled into the entry itself load with the entry.
+    if (pages.some(([, f]) => f.kind === "page" && f.framework === "tanstack")) {
+      for (const id of base.keys()) {
+        if (!/(^|\/)routes\//.test(id) || !/\.[jt]sx?$/.test(id)) continue;
+        const route = routeForTanstackFile(id);
+        if (route && !routes.has(route)) addRoute(route, id, base);
+      }
+    }
+    return finish();
+  }
+  for (const entry of entries) {
+    const facadeId = entry.facadeModuleId ? idOf(entry.facadeModuleId) : null;
+    let route = routeForEntry(facadeId ?? "", entry.name);
+    for (let n = 2; routes.has(route); n++) route = `${routeForEntry(facadeId ?? "", entry.name)}-${n}`;
+    addRoute(route, facadeId || "", partsOf([entry]));
+  }
+  return finish();
+
+  function finish(): ParsedGraph {
+    return {
+      meta: null,
+      modules,
+      routes,
+      clientPartsByRoute,
+      serverPartsByRoute: new Map(),
+      pathRouteUsage,
+      serverPathRouteUsage: new Map(),
+      outputs: [],
+      groups: [],
+    };
+  }
 }

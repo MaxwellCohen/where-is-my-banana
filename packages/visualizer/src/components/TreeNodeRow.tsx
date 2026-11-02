@@ -4,6 +4,7 @@ import { memo, useEffect, useState } from "react";
 import type { TreeNode } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
 import { pathsMatch } from "@/lib/wins";
+import { CopyPath } from "./CopyPath";
 
 interface Props {
   node: TreeNode;
@@ -81,6 +82,7 @@ export const TreeNodeRow = memo(function TreeNodeRow({ node, depth, routeTotal, 
               <span className="badge use">{node.routeCount}× use</span>
             ) : null}
           </span>
+          {node.kind === "module" ? <CopyPath path={node.path ?? node.id} /> : null}
         </span>
         <span className="tree-metric" title="Self attributed client bytes">
           {formatBytes(node.selfBytes)}

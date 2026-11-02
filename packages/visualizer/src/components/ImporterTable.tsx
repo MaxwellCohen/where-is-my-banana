@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { ImporterRow } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
+import { CopyPath } from "./CopyPath";
 import { DepInfoBadges, ImporterInfoBadges } from "./Badges";
 
 interface Props {
@@ -59,12 +60,14 @@ export function ImporterTable({ rows }: Props) {
                 <span className="importer-metric strong">{formatBytes(row.pullBytes)}</span>
                 <span className="importer-metric">{row.routeCount}</span>
               </button>
+              <CopyPath path={row.path} className="importer-copy" />
               {expanded && hasDeps ? (
                 <ul className="dep-list">
                   {row.topDeps!.map((dep) => (
                     <li key={dep.path} title={dep.path}>
                       <span className="dep-main">
                         <span className="dep-label">{dep.label}</span>
+                        <CopyPath path={dep.path} />
                         <DepInfoBadges
                           reach={dep.reach}
                           kind={dep.kind}
