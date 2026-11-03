@@ -1,4 +1,6 @@
 import type { WinsReport } from "./wins/types.js";
+import { CHECKS } from "./audit/types.js";
+import type { CheckName } from "./audit/types.js";
 
 export class FlagError extends Error {}
 
@@ -37,4 +39,32 @@ export function validateWinsReport(data: unknown, source: string): WinsReport {
     throw new FlagError(`--compare ${source} is not a wimb wins report (missing routes/wins)`);
   }
   return r as WinsReport;
+}
+
+export const FAIL_ON = ["high", "medium"] as const;
+
+export function parseAuditChecks(value: string | undefined): CheckName[] | undefined {
+  if (value === undefined || value === "") return undefined;
+  const names = value.split(",").map((s) => s.trim()).filter(Boolean);
+  const bad = names.filter((n) => !(CHECKS as readonly string[]).includes(n));
+  if (bad.length || names.length === 0) {
+    throw new FlagError(`--checks must be a comma-separated subset of ${CHECKS.join(",")}, got '${value}'`);
+  }
+  return names as CheckName[];
+}
+
+export function parseFailOn(value: string | undefined): "high" | "medium" | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (!(FAIL_ON as readonly string[]).includes(value)) {
+    throw new FlagError(`--fail-on must be one of ${FAIL_ON.join("|")}, got '${value}'`);
+  }
+  return value as "high" | "medium";
+}
+
+/** Parse --top: integer >= 1. */
+export function parseTop(value: string | undefined, fallback: number): number {
+  const n = parseNumberFlag("top", value);
+  if (n === undefined) return fallback;
+  if (!Number.isInteger(n) || n < 1) throw new FlagError(`--top must be a positive integer, got '${value}'`);
+  return n;
 }

@@ -82,12 +82,12 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const run = (a: RouteAttribution[]) => classifyWins(a, { projectRoot: root, byteSource: "measured" });
 
 describe("classifyWins", () => {
-  it("conditional render -> lazy, safe, ssr:false", async () => {
+  it("conditional render -> lazy, safe, SSR kept", async () => {
     const [w] = await run([attr("/cond", "app/cond/page.tsx", "components/Chart.tsx", 20000)]);
     expect(w!.fixKind).toBe("lazy");
     expect(w!.usage).toBe("conditional-render");
     expect(w!.safety).toBe("safe");
-    expect(w!.edit.replacementImport).toContain("ssr: false");
+    expect(w!.edit.replacementImport).not.toContain("ssr: false");
     expect(w!.usageLoc).toBeDefined();
   });
 

@@ -74,7 +74,7 @@ export interface Win {
 
 export interface WinEdit {
   summary: string;
-  /** e.g. "const Chart = dynamic(() => import('./Chart'), { ssr: false, loading: () => null })" */
+  /** e.g. "const Chart = dynamic(() => import('./Chart'), { loading: () => null })" */
   replacementImport?: string;
   /** pattern for the original import line to remove/replace */
   originalImport?: string;

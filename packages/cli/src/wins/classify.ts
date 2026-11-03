@@ -345,8 +345,7 @@ function buildEdit(
         };
       }
       const fw = ctx.framework ?? "next";
-      const ssrFalse = fw === "next" && usage !== "always-rendered" && (u.isClient || !u.isPageOrLayout);
-      const opts = ssrFalse ? "{ ssr: false, loading: () => null }" : "{ loading: () => null }";
+      const opts = "{ loading: () => null }";
       const stepsNamed = u.bindings.some((b) => b.kind === "named");
       const helper = { next: "next/dynamic", react: "React.lazy", preact: "preact/compat lazy", solid: "solid-js lazy", vue: "defineAsyncComponent", svelte: "dynamic import()", generic: "dynamic import()" }[fw];
       const header = fw === "next" ? [`import dynamic from 'next/dynamic';`] : LAZY_IMPORT[fw] ? [LAZY_IMPORT[fw]!] : [];
@@ -366,11 +365,7 @@ function buildEdit(
           ...boundary,
           "If the binding is a value (not a component), `await import()` it where first used instead.",
           ...(fw === "next"
-            ? [
-                ssrFalse
-                  ? "ssr:false is safe because the component renders only conditionally."
-                  : "Keep SSR enabled (above-the-fold content); consider a sized loading placeholder to avoid layout shift.",
-              ]
+            ? ["Keep SSR enabled (do not add ssr:false: it hurts SEO/LCP/CLS and is invalid in Server Components); use a sized loading placeholder to avoid layout shift."]
             : []),
           "Confirm no layout shift when the component appears.",
         ],

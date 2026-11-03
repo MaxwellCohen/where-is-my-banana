@@ -6,13 +6,21 @@ import { buildDualRouteForest } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import { writeVizGraph, writeVizFile } from "./viz.js";
 import { readFileSync } from "node:fs";
-import { FlagError, parseExitThreshold, parseFormats, parseNumberFlag, validateWinsReport } from "./index-flags.js";
+import { FlagError, parseAuditChecks, parseExitThreshold, parseFailOn, parseFormats, parseNumberFlag, parseTop, validateWinsReport } from "./index-flags.js";
+import { collectFindings, runAudit } from "./audit/index.js";
+import { formatAuditTerminal, writeAudit } from "./audit/output.js";
+import { applyFixes, formatFixSummary } from "./audit/fix.js";
+import { makeBaseline, readBaseline, writeBaseline } from "./audit/baseline.js";
+import { runLive, writeLive, formatTerminal } from "./live/index.js";
+import { DEFAULT_UA, MOBILE_UA } from "./live/net.js";
+import { loadConfig } from "./config.js";
 import { DEFAULT_VISUALIZER_URL, buildPayload, inlineUrl, launchBrowser, serveOnce } from "./open.js";
 import { runWins, runNextAnalyze } from "./wins/index.js";
 import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
 import type { WinsReport } from "./wins/types.js";
+import { parseSample, parseUrlFlag, runSpeed } from "./speed/index.js";
 
 function fail(err: unknown): void {
   console.error(`wimb: ${err instanceof Error ? err.message : String(err)}`);
@@ -242,6 +250,64 @@ const winsCommand = defineCommand({
   },
 });
 
+const auditCommand = defineCommand({
+  meta: { name: "audit", description: "Static, build-free whole-site performance audit (Next.js App Router / CMS apps)" },
+  args: {
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    json: { type: "boolean", description: "Print audit JSON to stdout", default: false },
+    top: { type: "string", description: "Findings per check in audit.md / terminal", default: "10" },
+    checks: { type: "string", description: "Comma-separated subset of checks to run" },
+    "fail-on": { type: "string", description: "Exit 1 if any finding at or above this severity (high|medium)" },
+    fix: { type: "boolean", description: "Apply safe mechanical autofixes (scripts, font display, ssr:false, image formats, hero priority, raw img lazy)", default: false },
+    "fix-dry-run": { type: "boolean", description: "Print a unified diff of the autofixes without writing", default: false },
+    force: { type: "boolean", description: "With --fix: also edit files that have unstaged git changes", default: false },
+    baseline: { type: "string", description: "Baseline file: only NEW findings are reported and counted by --fail-on" },
+    "save-baseline": { type: "boolean", description: "Write current findings to the --baseline file (default .wimb/audit-baseline.json) and exit 0", default: false },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let checks, failOn, top;
+    try {
+      checks = parseAuditChecks(args.checks);
+      failOn = parseFailOn(args["fail-on"]);
+      top = parseTop(args.top, 10);
+    } catch (err) {
+      return fail(err);
+    }
+    const config = await loadConfig(projectRoot);
+    const log = args.json ? console.error : console.log;
+    const base = { projectRoot, checks, ignoreFiles: config.ignores.files, ignoreRules: config.ignores.rules };
+    const baselinePath = args.baseline ? resolve(projectRoot, args.baseline) : undefined;
+    if (args["save-baseline"]) {
+      const target = baselinePath ?? resolve(projectRoot, ".wimb", "audit-baseline.json");
+      const { findings } = collectFindings(base);
+      writeBaseline(target, makeBaseline(findings));
+      log(`wimb audit: saved baseline of ${findings.length} finding(s) to ${target}`);
+      return;
+    }
+    if (args.fix || args["fix-dry-run"]) {
+      const { findings } = collectFindings(base);
+      const dryRun = !!args["fix-dry-run"];
+      const res = applyFixes(projectRoot, findings, { dryRun, force: args.force });
+      if (dryRun && res.diff) (args.json ? process.stderr : process.stdout).write(res.diff);
+      log(formatFixSummary(res, dryRun));
+    }
+    let baseline;
+    try {
+      baseline = baselinePath ? readBaseline(baselinePath) : undefined;
+    } catch (err) {
+      return fail(err);
+    }
+    const report = runAudit({ ...base, baseline });
+    const paths = writeAudit(projectRoot, report, top);
+    if (args.json) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    log(formatAuditTerminal(report, top));
+    log(`  wrote ${paths.md} and ${paths.json}`);
+    const bad = failOn === "high" ? report.summary.high : failOn === "medium" ? report.summary.high + report.summary.medium : 0;
+    process.stdout.write("", () => process.exit(bad > 0 ? 1 : 0));
+  },
+});
+
 const openCommand = defineCommand({
   meta: { name: "open", description: "Open the visualizer in a browser pre-loaded with .wimb/ data (no file picking)" },
   args: {
@@ -268,9 +334,122 @@ const openCommand = defineCommand({
   },
 });
 
+const speedCommand = defineCommand({
+  meta: { name: "speed", description: "One command: audit + wins (+ live) merged into a prioritized plan (.wimb/plan.{json,md})" },
+  args: {
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    url: { type: "string", description: "Live URL(s) to audit; repeatable or comma-separated" },
+    "urls-file": { type: "string", description: "File with one URL per line (live audit)" },
+    sitemap: { type: "string", description: "Sitemap URL for the live audit" },
+    sample: { type: "string", description: "Sample N URLs from the sitemap / URL list" },
+    wins: { type: "boolean", description: "Run `wimb wins` (use --no-wins to skip)", default: true },
+    live: { type: "boolean", description: "Run the live audit when URLs are given (use --no-live to skip)", default: true },
+    analyze: { type: "boolean", description: "Pass --no-analyze through to wins to reuse existing analyze data", default: true },
+    top: { type: "string", description: "Items per section in terminal / Do first", default: "10" },
+    json: { type: "boolean", description: "Print plan JSON to stdout", default: false },
+    prompt: { type: "boolean", description: "Print only the agent handoff prompt to stdout", default: false },
+    compare: { type: "boolean", description: "Show resolved/new/regressed vs .wimb/plan.prev.json", default: false },
+    snapshot: { type: "boolean", description: "Copy plan.json to plan.prev.json after the run", default: false },
+    "fail-on": { type: "string", description: "Exit 1 if any plan item at or above this severity (high|medium)" },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let opts;
+    try {
+      const rawUrls = [...(Array.isArray(args.url) ? args.url : [args.url])];
+      opts = {
+        projectRoot,
+        urls: parseUrlFlag(rawUrls),
+        urlsFile: args["urls-file"],
+        sitemap: args.sitemap,
+        sample: parseSample(args.sample),
+        wins: args.wins,
+        live: args.live,
+        analyze: args.analyze,
+        top: parseTop(args.top, 10),
+        compare: args.compare,
+        snapshot: args.snapshot,
+        failOn: parseFailOn(args["fail-on"]),
+      };
+    } catch (err) {
+      return fail(err);
+    }
+    let result;
+    try {
+      result = await runSpeed(opts);
+    } catch (err) {
+      return fail(err);
+    }
+    const quiet = args.json || args.prompt;
+    const log = quiet ? console.error : console.log;
+    if (args.prompt) process.stdout.write(result.plan.agentPrompt);
+    else if (args.json) process.stdout.write(JSON.stringify(result.plan, null, 2) + "\n");
+    log(result.terminal);
+    log(`  wrote ${result.paths.md} and ${result.paths.json}`);
+    process.stdout.write("", () => process.exit(result.exitCode));
+  },
+});
+
+const liveCommand = defineCommand({
+  meta: { name: "live", description: "Runtime audit of deployed pages (HTML, headers, scripts, GTM, images) over plain HTTP" },
+  args: {
+    "urls-file": { type: "string", description: "File with one URL per line" },
+    sitemap: { type: "string", description: "Sitemap URL; samples --sample URLs across path patterns" },
+    sample: { type: "string", description: "URLs to sample from the sitemap", default: "8" },
+    concurrency: { type: "string", description: "Parallel page fetches", default: "3" },
+    timeout: { type: "string", description: "Per-request timeout in ms", default: "15000" },
+    "user-agent": { type: "string", description: "User-Agent header" },
+    mobile: { type: "boolean", description: "Use a mobile User-Agent", default: false },
+    "max-requests": { type: "string", description: "Total request cap", default: "150" },
+    out: { type: "string", description: "Output directory", default: ".wimb" },
+    json: { type: "boolean", description: "Print JSON to stdout", default: false },
+    "fail-on": { type: "string", description: "Exit 1 on findings at or above high|medium" },
+    lighthouse: { type: "boolean", description: "Run Lighthouse via npx --no-install (first 3 pages)", default: false },
+    "lighthouse-json": { type: "string", description: "Import existing Lighthouse JSON report(s); extra .json args are also imported" },
+  },
+  async run({ args }) {
+    try {
+      const pos = ((args as any)._ as string[] | undefined) ?? [];
+      const lhArg = args["lighthouse-json"] as unknown;
+      const lhJson = ([] as string[]).concat((lhArg as string | string[] | undefined) ?? [], pos.filter((x) => /\.json$/i.test(x)));
+      const urls = pos.filter((x) => !/\.json$/i.test(x));
+      const failOn = parseFailOn(args["fail-on"]);
+      const int = (n: string, v: string | undefined, d: number) => {
+        const x = parseNumberFlag(n, v);
+        return x === undefined ? d : Math.max(1, Math.floor(x));
+      };
+      if (!urls.length && !args["urls-file"] && !args.sitemap && !lhJson.length) {
+        throw new FlagError("usage: wimb live <url...> [--urls-file f] [--sitemap url]");
+      }
+      const report = await runLive({
+        urls,
+        urlsFile: args["urls-file"],
+        sitemap: args.sitemap,
+        sample: int("sample", args.sample, 8),
+        concurrency: int("concurrency", args.concurrency, 3),
+        timeoutMs: int("timeout", args.timeout, 15000),
+        userAgent: args["user-agent"] ?? (args.mobile ? MOBILE_UA : DEFAULT_UA),
+        mobile: args.mobile,
+        maxRequests: int("max-requests", args["max-requests"], 150),
+        out: args.out,
+        json: args.json,
+        failOn,
+        lighthouse: args.lighthouse,
+        lighthouseJson: lhJson,
+      });
+      writeLive(report, args.out);
+      if (args.json) console.log(JSON.stringify(report, null, 2));
+      else console.log(formatTerminal(report, args.out));
+      if (failOn && report.findings.some((f) => f.severity === "high" || (failOn === "medium" && f.severity === "medium"))) process.exitCode = 1;
+    } catch (err) {
+      fail(err);
+    }
+  },
+});
+
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, open: openCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand },
 });
 
 runMain(main);

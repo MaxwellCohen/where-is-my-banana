@@ -34,7 +34,7 @@ Read `.wimb/wins.json` (`WinsReport`). Wins are sorted by `totalSavedBytes` desc
 Use `win.edit`: `originalImport` is the line to replace, `replacementImport` the new code, `steps` the ordered instructions. Open `edge.importer` at `loc.line` first.
 
 Per `fixKind`:
-- `lazy`: replace the static import with `next/dynamic` (`ssr: false` only if the component is not needed for first paint).
+- `lazy`: replace the static import with `next/dynamic` (keep SSR on; never add `ssr: false`).
 - `move-to-server`: remove `'use client'` or move the logic into a server component; pass data as props.
 - `swap-package`: replace the dependency with the lighter one named in `steps`; update imports.
 - `deep-import`: import from the subpath instead of the barrel.
@@ -51,7 +51,7 @@ Edge cases:
 | Reason | Meaning | Check before editing |
 |---|---|---|
 | `above-the-fold` | Rendered unconditionally near the top of a page/layout | Lazy loading will hurt LCP/CLS. Only proceed if a `loading` placeholder keeps layout stable, or skip. |
-| `needs-ssr` | Likely needed for first paint or SEO | Do not use `ssr: false`. Use `dynamic` with SSR on, or skip. |
+| `needs-ssr` | Likely needed for first paint or SEO | Use `dynamic` with SSR on, or skip. |
 | `named-export` | `next/dynamic` needs `.then(m => m.X)` | Mechanical; confirm the export name. |
 | `no-default-export` | Module has no default export | Same mapping as above. |
 | `already-in-suspense` | Already under a Suspense boundary | Likely already deferred; confirm the import is actually still sync in the graph before changing. |

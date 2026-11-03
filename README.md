@@ -99,6 +99,43 @@ npx @maxwellcohen/wimb wins --cwd . \
 - `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
 - `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
 
+## Whole-site audit
+
+`wimb audit` is a fast, build-free static audit for Next.js App Router / CMS-driven sites. It reads source files and every workspace `package.json` (skips `node_modules`, `.next`, `dist`, `.wimb`, `.git`) and writes `.wimb/audit.json` and `.wimb/audit.md` (a "Do these first" list, then findings by severity and check, each with a concrete fix). Registry/boundary/barrel rules live in `wimb scan`.
+
+Flags: `--cwd`, `--json` (print JSON to stdout), `--top N` (per check, default 10), `--checks a,b,c`, `--fail-on high|medium` (exit 1), `--fix`, `--fix-dry-run`, `--force`, `--baseline`, `--save-baseline`. Invalid values exit 2. Suppress one finding with `// wimb-ignore-next-line <check>`; `wimb.config.ts` `ignores.rules` / `ignores.files` are honored.
+
+Monorepos: when `pnpm-workspace.yaml` or `package.json` `workspaces` is present, each workspace package that depends on `next` is audited separately and findings carry a `package` label. `ignores.files` accepts real globs (`*`, `**`, `?`, `{a,b}`, `[abc]`, `!negation`; a bare name matches at any depth).
+
+Autofix: `--fix-dry-run` prints a unified diff; `--fix` writes it. Only safe mechanical edits: `strategy="lazyOnload"` on non-consent third-party `<Script>` (consent managers such as OneTrust/Cookiebot are reported, never changed), non-swap font `display` to `swap`, drop `ssr: false` where the audit flags it, add `images.formats` (avif, webp) to a plain `next.config`, `priority` on a hero-named `next/image`, and `loading="lazy" decoding="async"` on raw `<img>` outside hero/header/nav/logo files. Idempotent; ambiguous spots are skipped and listed; files with unstaged git changes are skipped unless `--force`.
+
+Baseline: `--save-baseline [--baseline file]` records current findings (default `.wimb/audit-baseline.json`); `--baseline file` then reports and fails (`--fail-on`) only on NEW findings. Fingerprint = rule id + file + message with digits normalized (line numbers ignored); a repeated issue in the same file counts as new beyond the baselined count.
+
+Scoring: each finding has `impactScore` (0-100 estimate, not measured: severity base 75/45/15, +5 to +10 for sitewide or LCP checks, +10 in layouts, -5 to -10 for info-like rules) and `effort` S (minutes), M (about an hour), L (a day or more). "Do these first" ranks by impact divided by effort weight (S=1, M=2, L=4), at most 2 per check on the first pass.
+
+Checks: `third-party-script`, `raw-img`, `lcp-priority`, `image-config`, `cms-image-params`, `fonts`, `force-dynamic`, `missing-static-params`, `sequential-await`, `full-cms-payload-to-client`, `heavy-deps`, `old-browserslist`, `maps-widgets`, `middleware-scope`, `preview-code-in-prod`, `css-weight`, `use-client-inventory`, `ssr-false-misuse`. Checks are regex heuristics, not AST analysis; expect some false positives.
+
+## One command: `wimb speed`
+
+`wimb speed` runs the static audit, `wimb wins` (skipped with a warning if the project has no `next`/`vite` dependency or the run fails), and, when URLs are given, the live audit. It merges everything into one ranked plan: `.wimb/plan.json` and `.wimb/plan.md` (headline, speed budget, quick wins, biggest risk, "Do first (code, safe)", "Needs a human decision", "Not code (GTM/CDN/CMS)", "Later", per-page-type table when live data exists, and a paste-ready agent "Handoff prompt"). Related findings are deduped (e.g. "Defer 6 third-party scripts" with every location) and a static finding corroborated by a live one becomes a single higher-scored item. Rank = impact score / effort.
+
+```bash
+npx --yes @maxwellcohen/wimb speed --url https://example.com   # --url is optional
+npx --yes @maxwellcohen/wimb speed --prompt                    # only the agent prompt, to stdout
+npx --yes @maxwellcohen/wimb speed --snapshot                  # save plan.json as plan.prev.json
+npx --yes @maxwellcohen/wimb speed --compare                   # resolved / new / regressed vs plan.prev.json
+```
+
+Flags: `--cwd`, `--url` (repeatable or comma list), `--urls-file`, `--sitemap`, `--sample N`, `--no-wins`, `--no-live`, `--no-analyze` (passed to wins), `--top N`, `--json`, `--prompt`, `--compare`, `--snapshot`, `--fail-on high|medium` (exit 1), `--fix`, `--fix-dry-run`, `--force`, `--baseline`, `--save-baseline`. Invalid values exit 2. KB estimates are "measured" only for bundle wins; other categories use coarse per-finding heuristics and are labeled "rough".
+
+## Live runtime audit
+
+`wimb live <url...>` audits deployed pages over plain HTTP (Node 20 `fetch`, no browser). It GETs each page once, HEADs assets for sizes (ranged GET fallback), and writes `.wimb/live.json` and `.wimb/live.md` (detection header, per-page table, "Do these first", findings by check). Every finding carries `owner: code|gtm|cdn|cms`; a code agent can only fix `code`.
+
+Flags: `--urls-file`, `--sitemap <url>` + `--sample 8` (spreads samples across path patterns), `--concurrency 3`, `--timeout 15000`, `--user-agent`, `--mobile`, `--max-requests 150`, `--out .wimb`, `--json`, `--fail-on high|medium`, `--lighthouse` (runs `npx --no-install lighthouse`, first 3 pages), `--lighthouse-json <file...>` (import existing reports).
+
+Checks: `html-size`, `headers` (compression, cache, cookies, TTFB), `scripts` (+ vendor grouping), `gtm` (container size/vendors), `css`, `fonts`, `images` (+ LCP candidate), `hints`, `head`, `redirects`, `dom`, `cross-page`, `lighthouse`. These are heuristics over server-rendered HTML: client-injected resources and CSS file contents are not seen, and transfer sizes are estimated.
+
 ## Security notes
 
 - `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npm exec --no-install`) and never uses a shell on macOS/Linux.
