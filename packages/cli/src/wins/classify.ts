@@ -6,6 +6,7 @@ import { loadDataTables } from "../data/index.js";
 import { loadReplacements } from "../external/module-replacements.js";
 import { analyzeImportUsage, findGuardCandidate, moduleFacts, type GuardCandidate, type ImportUsage } from "./usage-analyze.js";
 import { buildGuardEdit, guardKindFor } from "./guard-heavy.js";
+import { buildMarkdownPipelineEdit, findUnifiedPipeline, pipelineCandidate } from "./markdown-pipeline.js";
 import { attachTestImpact } from "./test-impact.js";
 import type {
   Confidence,
@@ -211,7 +212,7 @@ export async function classifyWins(
     const deferredUse = usage === "conditional-render" || usage === "event-handler-only";
     const guard: GuardCandidate | null =
       isPackage && importerSrc && !isRemove && usage !== "event-handler-only" && guardKindFor(edge.packageName!)
-        ? findGuardCandidate(edge.importer, importerSrc, edge)
+        ? (findGuardCandidate(edge.importer, importerSrc, edge) ?? pipelineCandidate(edge.importer, importerSrc, edge.packageName!))
         : null;
 
     let fixKind: FixKind | null = null;
@@ -256,8 +257,12 @@ export async function classifyWins(
     if (others.length > 0) reasons.add("shared-with-eager-route");
 
     // Predicted saving: measured saving minus the lazy-loading runtime (component form only; handler import() is ~free).
+    // Lazy-loading an always-rendered component in a server-rendered importer only moves it from first-load to
+    // "preloaded": Next still emits preload tags for its chunk, so first-load bytes don't drop.
+    const movesToPreloaded = fixKind === "lazy" && (usage === "always-rendered" || usage === "unknown") && !!u?.found && total > 0;
     let predicted = total;
     if (fixKind === "lazy" && usage !== "event-handler-only" && !g.dynamicRuntime) predicted = Math.max(0, total - DYNAMIC_RUNTIME_BYTES);
+    if (movesToPreloaded) predicted = 0;
     if (g.alsoReachableVia?.length) reasons.add("static-elsewhere");
     if (fixKind === "lazy" && predicted < MIN_PREDICTED_SAVING_BYTES) reasons.add("net-negative-risk");
     let confidence: Confidence = "high";
@@ -270,11 +275,7 @@ export async function classifyWins(
       if (confidence === "high") confidence = "medium";
     }
 
-    // Lazy-loading an always-rendered component in a server-rendered importer only moves it from first-load to
-    // "preloaded": Next still emits preload tags for its chunk, so the transfer saving is small.
-    const movesToPreloaded = fixKind === "lazy" && (usage === "always-rendered" || usage === "unknown") && !!u?.found && total > 0;
-
-    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard);
+    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard, importerSrc);
     if (movesToPreloaded) {
       edit.summary += ` (moves ${kb(total)} KB from first-load to preloaded; real saving only if the component is conditional)`;
       edit.steps.push("This only moves bytes from first-load to preloaded: the dynamic chunk is still preloaded on server render. Real transfer savings need the component to render conditionally (tab, modal, below-the-fold); otherwise the gain is parse/hydrate time.");
@@ -323,6 +324,7 @@ function buildEdit(
   routes: string[],
   replacement: string | undefined,
   guard: GuardCandidate | null = null,
+  importerSrc: string | null = null,
 ): WinEdit {
   const target = edge.packageName ?? edge.imported;
   const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare .wimb/wins.json  # rebuild + compare routes: ${routes.join(", ")}`;
@@ -367,7 +369,9 @@ function buildEdit(
         verify,
       };
     case "guard-heavy": {
-      const g = guard && edge.packageName ? buildGuardEdit(edge.packageName, guard, file) : null;
+      const pipe = guard && importerSrc && edge.packageName ? findUnifiedPipeline(file, importerSrc) : null;
+      const inPipe = !!pipe && pipe.imports.some((x) => x.spec === edge.packageName || x.spec.startsWith(`${edge.packageName}/`));
+      const g = inPipe ? buildMarkdownPipelineEdit(pipe!, file) : guard && edge.packageName ? buildGuardEdit(edge.packageName, guard, file) : null;
       return {
         summary: g?.summary ?? `Guard ${target} behind a cheap pre-check in ${file}`,
         originalImport: original,

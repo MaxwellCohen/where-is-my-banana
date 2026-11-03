@@ -16,7 +16,7 @@ One loop: measure, pick the top safe win, edit, re-measure, keep or revert.
 ```bash
 pnpm exec next analyze --output --snapshot wins   # Next 16.4+
 pnpm exec next analyze export --snapshot wins > .wimb/graph.jsonl
-cp .wimb/wins.json .wimb/wins.prev.json 2>/dev/null   # baseline for step 4
+pnpm exec wimb verify --init --cwd . --analyze-export .wimb/graph.jsonl --no-analyze   # baseline for step 4 (or: cp .wimb/wins.json .wimb/wins.prev.json)
 pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl
 ```
 
@@ -75,8 +75,16 @@ After the loop, `wimb validate` checks the graph numbers against the built route
 
 ## 4. Verify
 
+After EACH single edit (one win at a time), rebuild, re-run the analyze/export commands from step 1, then:
+
 ```bash
-pnpm exec next build            # then re-run the analyze/export commands from step 1
+pnpm exec wimb verify --win '<win.id>' --revert --accept --cwd . --analyze-export .wimb/graph.jsonl --no-analyze
+```
+
+It prints per-route first-load/preloaded/on-demand deltas, exits 1 and reverts only that win's files (`git checkout --`; add `--files <path>` for extra files you touched) when first-load rose or the target route did not improve, and on success rotates the baseline. Failed ids are remembered in `.wimb/verify.json` and shown as `failed-previously` by later `wins` runs. Manual alternative:
+
+```bash
+pnpm exec next build
 pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl --compare .wimb/wins.prev.json
 pnpm exec tsc --noEmit && pnpm test
 ```
@@ -85,7 +93,7 @@ Confirm the targeted win is gone (or smaller) and the byte delta is positive and
 
 If the delta is not realized, or anything regressed: `git checkout -- <files>` and move to the next win. Then `cp .wimb/wins.json .wimb/wins.prev.json` before the next iteration.
 
-After any `lazy` win, the saving is only real if bytes dropped: compare `firstLoadBytes` before/after with `--compare` and **revert the change if the route did not shrink** (a chunk can stay in first load via another static chain or an SSR-rendered `dynamic`). Use `pnpm exec wimb why <pkg>` to see every import chain keeping a package in the bundle. Rank by `predictedSavedBytes` (falls back to `totalSavedBytes`) and read `confidence`.
+After any `lazy` win, the saving is only real if bytes dropped: compare `firstLoadBytes` before/after with `--compare` and **revert the change if the route did not shrink** (a chunk can stay in first load via another static chain or an SSR-rendered `dynamic`). Use `pnpm exec wimb why <pkg>` (or `wimb packages --why <pkg>`; `wimb packages` lists bytes by package) to see every import chain keeping a package in the bundle. Lazy wins on always-rendered components have `predictedSavedBytes: 0` (they only move bytes to preloaded): skip them unless the component renders conditionally. Rank by `predictedSavedBytes` (falls back to `totalSavedBytes`) and read `confidence`.
 
 ## 5. Stop when
 

@@ -5,7 +5,7 @@ import { scan } from "./scan.js";
 import { buildDualRouteForest } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import { writeVizGraph, writeVizFile } from "./viz.js";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { FlagError, parseAuditChecks, parseExitThreshold, parseFailOn, parseFormats, parseNumberFlag, parseTop, validateWinsReport } from "./index-flags.js";
 import { collectFindings, runAudit } from "./audit/index.js";
 import { formatAuditTerminal, writeAudit } from "./audit/output.js";
@@ -22,6 +22,7 @@ import { formatPackageTable, packageTable } from "./wins/packages.js";
 import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
+import { acceptBaseline, applyRevert, judge, planRevert, recordVerify, snapshotFileState, winFiles, wimbPath } from "./wins/verify.js";
 import type { WinsReport } from "./wins/types.js";
 import { formatValidationTerminal, runValidate, writeValidation } from "./wins/validate.js";
 import { parseSample, parseUrlFlag, runSpeed } from "./speed/index.js";
@@ -213,6 +214,159 @@ const whyCommand = defineCommand({
     }
     console.log(args.json ? JSON.stringify(report, null, 2) : formatWhy(report));
     const exitCode = report.routes.length ? 0 : 1;
+    process.stdout.write("", () => process.exit(exitCode));
+  },
+});
+
+const graphArgs = {
+  cwd: { type: "string", description: "Project root", default: process.cwd() },
+  "analyze-export": { type: "string", description: "next analyze export JSONL (.jsonl or .jsonl.gz)" },
+  "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
+  snapshot: { type: "string", description: "Named next analyze snapshot" },
+  analyze: { type: "boolean", description: "Run `next analyze --output` first (use --no-analyze to reuse existing data)", default: true },
+  vite: { type: "boolean", description: "Analyze a Vite app via an in-process build (auto-detected)" },
+} as const;
+
+async function loadGraphFromArgs(args: {
+  cwd: string;
+  "analyze-export"?: string;
+  "dist-dir"?: string;
+  snapshot?: string;
+  analyze: boolean;
+  vite?: boolean;
+}): Promise<ParsedGraph> {
+  const projectRoot = resolve(args.cwd);
+  const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
+  const vite = args.vite ?? isViteProject(projectRoot);
+  if (!vite && args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
+  return loadGraph({
+    projectRoot,
+    analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
+    distDir: args["dist-dir"],
+    snapshot,
+    vite,
+    analyzed: args.analyze,
+  });
+}
+
+const packagesCommand = defineCommand({
+  meta: { name: "packages", description: "Bytes by package in client first-load JS; --why <pkg> traces the import chains that pull a package in" },
+  args: {
+    ...graphArgs,
+    top: { type: "string", description: "Number of packages to print", default: "25" },
+    route: { type: "string", description: "Only routes containing this substring" },
+    why: { type: "string", description: "Explain why this package/file is in first-load JS (same as `wimb why <pkg>`)" },
+    "all-routes": { type: "boolean", description: "With --why: list every route that includes the target", default: false },
+    chains: { type: "string", description: "With --why: max distinct import chains per route", default: "3" },
+    json: { type: "boolean", description: "Print JSON", default: false },
+  },
+  async run({ args }) {
+    let exitCode = 0;
+    try {
+      const top = parseNumberFlag("top", args.top) ?? 25;
+      const chains = parseNumberFlag("chains", args.chains) ?? 3;
+      const graph = await loadGraphFromArgs(args);
+      if (args.why) {
+        const report = whyReport(graph, args.why, { route: args.route, allRoutes: args["all-routes"], chains });
+        console.log(args.json ? JSON.stringify(report, null, 2) : formatWhy(report));
+        exitCode = report.routes.length ? 0 : 1;
+      } else {
+        const rgs = [...graph.routes.keys()]
+          .sort()
+          .filter((r) => !args.route || r.includes(args.route))
+          .map((r) => buildRouteGraph(graph, r))
+          .filter((r): r is RouteGraph => !!r);
+        const rows = packageTable(rgs, top);
+        console.log(args.json ? JSON.stringify(rows, null, 2) : formatPackageTable(rows).join("\n"));
+      }
+    } catch (err) {
+      return fail(err);
+    }
+    process.stdout.write("", () => process.exit(exitCode));
+  },
+});
+
+const listFlag = (v: unknown): string[] => (Array.isArray(v) ? v : v ? [v] : []).flatMap((x) => String(x).split(",")).map((x) => x.trim()).filter(Boolean);
+
+const verifyCommand = defineCommand({
+  meta: { name: "verify", description: "Rebuild after an edit and compare with the baseline: per-route first-load/preloaded/on-demand deltas, keep-or-revert verdict" },
+  args: {
+    ...graphArgs,
+    "min-bytes": { type: "string", description: "Drop edges saving fewer bytes than this" },
+    baseline: { type: "string", description: "Baseline wins.json (default .wimb/wins.prev.json, falling back to .wimb/wins.json)" },
+    init: { type: "boolean", description: "Take the baseline snapshot now (writes wins.json, wins.prev.json) and exit", default: false },
+    win: { type: "string", description: "Win id to attribute this check to (verdict recorded in .wimb/verify.json)" },
+    tolerance: { type: "string", description: "Bytes of first-load change treated as noise", default: "200" },
+    revert: { type: "boolean", description: "On failure, `git checkout --` only the win's files (and --files)", default: false },
+    files: { type: "string", description: "Extra file to revert on failure (repeatable, relative to --cwd)" },
+    "force-revert": { type: "boolean", description: "Revert even files that had uncommitted changes before the win", default: false },
+    accept: { type: "boolean", description: "On success, rotate the baseline (wins.json -> wins.prev.json)", default: false },
+    json: { type: "boolean", description: "Print the verdict as JSON", default: false },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let exitCode = 0;
+    try {
+      const tolerance = parseNumberFlag("tolerance", args.tolerance) ?? 200;
+      const minBytes = parseNumberFlag("min-bytes", args["min-bytes"]);
+      const prevPath = resolve(projectRoot, args.baseline ?? join(".wimb", "wins.prev.json"));
+      const fallback = wimbPath(projectRoot, "wins.json");
+      let baseline: WinsReport | undefined;
+      if (!args.init) {
+        const file = existsSync(prevPath) ? prevPath : !args.baseline && existsSync(fallback) ? fallback : null;
+        if (!file) throw new FlagError(`no baseline at ${prevPath}; run \`wimb verify --init\` before editing`);
+        baseline = validateWinsReport(JSON.parse(readFileSync(file, "utf-8")), file);
+      }
+      const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
+      const vite = args.vite ?? isViteProject(projectRoot);
+      if (!vite && args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
+      const report = await runWins({
+        projectRoot,
+        analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
+        distDir: args["dist-dir"],
+        snapshot,
+        vite,
+        minBytes,
+        analyzed: args.analyze,
+      });
+      writeWins(projectRoot, report);
+      if (args.init || !baseline) {
+        acceptBaseline(projectRoot);
+        snapshotFileState(projectRoot, report);
+        console.log(`wimb: baseline saved (${report.routes.length} routes, ${report.wins.length} wins) -> .wimb/wins.prev.json`);
+      } else {
+        const win = args.win ? baseline.wins.find((w) => w.id === args.win) : undefined;
+        if (args.win && !win) throw new FlagError(`win ${args.win} not found in the baseline`);
+        const v = judge(baseline, report, { tolerance, win });
+        const sign = (n: number) => `${n >= 0 ? "+" : ""}${(n / 1024).toFixed(1)} KB`;
+        if (args.json) console.log(JSON.stringify({ winId: args.win ?? null, status: v.status, reason: v.reason, deltas: v.deltas }, null, 2));
+        else {
+          for (const d of v.deltas) console.log(`  ${d.route}  first-load ${sign(d.firstLoad)}  preloaded ${sign(d.preloaded)}  on-demand ${sign(d.onDemand)}`);
+          console.log(`wimb verify: ${v.status}${args.win ? ` (${args.win})` : ""}: ${v.reason}`);
+        }
+        if (args.win) recordVerify(projectRoot, { winId: args.win, status: v.status, deltas: v.deltas, reason: v.reason, timestamp: new Date().toISOString() });
+        if (v.status === "failed") {
+          exitCode = 1;
+          if (args.revert) {
+            const files = [...winFiles(win), ...listFlag(args.files)];
+            if (files.length === 0) console.error("wimb verify: --revert needs --win <id> or --files <path>; nothing reverted");
+            else {
+              const plan = planRevert(projectRoot, files, args["force-revert"]);
+              for (const r of plan.refused) console.error(`wimb verify: refusing to revert ${r.file}: ${r.why}`);
+              console.error(plan.revert.length ? `wimb verify: reverting (git checkout --) ${plan.revert.join(", ")}` : "wimb verify: nothing to revert");
+              applyRevert(projectRoot, plan);
+              if (plan.revert.length) console.error("wimb verify: rebuild before the next check; the baseline is unchanged");
+            }
+          }
+        } else if (args.accept) {
+          acceptBaseline(projectRoot);
+          snapshotFileState(projectRoot, report);
+          console.error("wimb verify: baseline rotated (.wimb/wins.json -> .wimb/wins.prev.json)");
+        }
+      }
+    } catch (err) {
+      return fail(err);
+    }
     process.stdout.write("", () => process.exit(exitCode));
   },
 });
@@ -559,7 +713,7 @@ const validateCommand = defineCommand({
 
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, why: whyCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand, validate: validateCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, why: whyCommand, packages: packagesCommand, verify: verifyCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand, validate: validateCommand },
 });
 
 runMain(main);

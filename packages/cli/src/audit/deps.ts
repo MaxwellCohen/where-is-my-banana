@@ -22,6 +22,7 @@ export const HEAVY: Heavy[] = [
   { re: /^(?:styled-components|@emotion\/(?:react|styled))$/, severity: "medium", message: "Runtime CSS-in-JS needs client JS and slows hydration.", fix: "Move to CSS modules/Tailwind/vanilla-extract (build-time CSS)." },
   { re: /^(?:framer-motion|motion)$/, severity: "medium", message: "framer-motion adds ~30-50 KB gz to every route that imports it.", fix: "Use `LazyMotion` + `m` components with domAnimation, CSS transitions, or lazy-load animated sections." },
   { re: /^gsap$/, severity: "medium", message: "gsap is ~25 KB+ gz plus plugins.", fix: "Dynamic-import gsap inside effects only on routes that animate; prefer CSS animations." },
+  { re: /^(?:unified|remark(?:-[\w-]+)?|rehype(?:-[\w-]+)?|micromark(?:-[\w-]+)?|mdast-[\w-]+|hast-[\w-]+|react-markdown|markdown-it|marked|showdown|commonmark|@mdx-js\/[\w-]+|mdx)$/, severity: "medium", message: "Markdown/unified stack (parser + remark/rehype plugins) is ~100+ KB gz when bundled for the client.", fix: "Render markdown on the server, or gate the client call behind a cheap regex pre-check (/[*_#`\\[\\]<>\\\\]|^\\s*[-+]\\s|\\n\\n/m) and `await import()` unified + plugins only when it matches; `wimb wins` generates the edit." },
   { re: /^(?:yup|joi)$/, severity: "low", message: "Validation library may be shipped to the client.", fix: "Keep validation server-side or use a lighter schema lib (valibot) if forms need it client-side." },
 ];
 

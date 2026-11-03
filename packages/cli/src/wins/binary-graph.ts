@@ -11,6 +11,7 @@ import {
   type ModulesHeader,
 } from "../build/binary-format.js";
 import { buildGraph, relPath } from "../graph/builder.js";
+import { INJECTED_CLIENT_ENTRY_FILES } from "./reach.js";
 
 export interface BinaryGraphResult {
   graph: ParsedGraph;
@@ -112,6 +113,8 @@ export async function buildGraphFromBinary(
     return m;
   };
   for (const bytes of perRoute.values()) for (const p of bytes.keys()) ensure(p);
+  // Next injects instrumentation-client into every page's client entry; make sure it is a graph node.
+  for (const f of INJECTED_CLIENT_ENTRY_FILES) if (existsSync(join(projectRoot, f))) ensure(normalizeModulePath(f));
 
   if (edgeSource === "source-graph") {
     const sg = await buildGraph(projectRoot);

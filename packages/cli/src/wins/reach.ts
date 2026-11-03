@@ -30,6 +30,32 @@ export interface RouteGraph {
   pathBytes: Map<string, number>;
   /** BFS parent for shortest chains (root's parent is 0, unreached = -1) */
   parent: number[];
+  /** node is reachable from an injected entry (instrumentation-client etc.) */
+  fromInjected: boolean[];
+}
+
+/** Files Next injects into every page's client entry. */
+export const INJECTED_CLIENT_ENTRY_FILES = ["instrumentation-client.ts", "instrumentation-client.tsx", "instrumentation-client.js", "src/instrumentation-client.ts", "src/instrumentation-client.tsx", "src/instrumentation-client.js"];
+const INJECTED_ALWAYS_RE = /^(?:\[project\]\/)?(?:src\/)?instrumentation-client\.[cm]?[jt]sx?$/;
+/** Server/edge entries: only seeded when they actually contribute client bytes to the route. */
+const INJECTED_IF_CLIENT_RE = /^(?:\[project\]\/)?(?:src\/)?(?:instrumentation|middleware|proxy)\.[cm]?[jt]sx?$/;
+
+const injectedCache = new WeakMap<ParsedGraph, { always: string[]; ifClient: Array<{ ident: string; path: string }> }>();
+
+/** Injected entries (instrumentation-client always; instrumentation/middleware/proxy only if client-bundled in `route`). */
+export function injectedEntries(graph: ParsedGraph, route: string): string[] {
+  let c = injectedCache.get(graph);
+  if (!c) {
+    c = { always: [], ifClient: [] };
+    for (const m of graph.modules.values()) {
+      const p = normalizeModulePath(m.path);
+      if (INJECTED_ALWAYS_RE.test(p)) c.always.push(m.ident);
+      else if (INJECTED_IF_CLIENT_RE.test(p)) c.ifClient.push({ ident: m.ident, path: p });
+    }
+    injectedCache.set(graph, c);
+  }
+  const parts = graph.clientPartsByRoute.get(route);
+  return [...c.always, ...c.ifClient.filter((m) => parts?.has(m.path)).map((m) => m.ident)];
 }
 
 export function collectSeeds(graph: ParsedGraph, route: string): string[] {
@@ -57,6 +83,7 @@ export function collectSeeds(graph: ParsedGraph, route: string): string[] {
       }
     }
   }
+  for (const id of injectedEntries(graph, route)) seeds.add(id);
   return [...seeds];
 }
 
@@ -81,11 +108,13 @@ export function buildRouteGraph(graph: ParsedGraph, route: string): RouteGraph |
     return i;
   };
 
+  const injectedIdents = new Set(injectedEntries(graph, route));
   const queue: number[] = [];
+  const seedSet = new Set<number>();
   for (const s of collectSeeds(graph, route)) {
     const had = index.has(s);
     const i = intern(s);
-    if (!succ[0].includes(i)) succ[0].push(i);
+    if (!seedSet.has(i)) { seedSet.add(i); succ[0].push(i); }
     if (!had) queue.push(i);
   }
   for (let q = 0; q < queue.length; q++) {
@@ -149,7 +178,15 @@ export function buildRouteGraph(graph: ParsedGraph, route: string): RouteGraph |
   }
   const firstLoadBytes = totalBytes - dynamicBytes;
 
-  return { route, firstLoadBytes, dynamicRefs, idents, succ, preds, paths, bytes, pathBytes: parts, parent: bfsParents(succ, n) };
+  const fromInjected = new Array<boolean>(n).fill(false);
+  const st: number[] = [];
+  for (const id of injectedIdents) {
+    const i = index.get(id);
+    if (i !== undefined && !fromInjected[i]) { fromInjected[i] = true; st.push(i); }
+  }
+  while (st.length) for (const v of succ[st.pop()!]) if (!fromInjected[v]) { fromInjected[v] = true; st.push(v); }
+
+  return { route, firstLoadBytes, dynamicRefs, idents, succ, preds, paths, bytes, pathBytes: parts, parent: bfsParents(succ, n), fromInjected };
 }
 
 function bfsParents(succ: number[][], n: number, skip?: (u: number, v: number) => boolean): number[] {

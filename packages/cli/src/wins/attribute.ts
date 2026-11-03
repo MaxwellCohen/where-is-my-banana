@@ -1,4 +1,4 @@
-import { packageNameFromPath } from "@wimb/graph-v1";
+import { isAppSourcePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import type { EdgeCut, RouteAttribution } from "./types.js";
 import { buildRouteGraph, chainFrom, lostBytes, parentsWithout } from "./reach.js";
@@ -121,17 +121,21 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): Ro
     }
   };
 
-  const cands: Array<{ cut: EdgeCut; u: number; v: number }> = [];
+  const cands: Array<{ cut: EdgeCut; u: number; v: number; forceExact?: boolean }> = [];
   for (let u = 1; u < n; u++) {
     if (parent[u] === -1) continue;
     for (const v of succ[u]) {
       // Another entry into v that v doesn't dominate keeps v alive => 0 unique bytes.
-      if (!preds[v].every((p) => p === u || dominates(v, p))) continue;
+      // Exception: v is also pulled in by an injected entry (instrumentation-client): keep it for the exact
+      // check below so the win is reported as static-elsewhere instead of vanishing.
+      const shared = !preds[v].every((p) => p === u || dominates(v, p));
+      if (shared && !(rg.fromInjected[v] && !rg.fromInjected[u] && isAppSourcePath(paths[u]))) continue;
       const uniqueBytes = domBytes[v];
       if (uniqueBytes < minBytes || uniqueBytes <= 0) continue;
       cands.push({
         u,
         v,
+        ...(shared ? { forceExact: true } : {}),
         cut: {
           edge: { importer: paths[u], imported: paths[v], packageName: packageNameFromPath(paths[v]) },
           chain: [...chainTo(u), paths[v]],
@@ -145,7 +149,7 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): Ro
   // Catches the same file reached under another module ident (dominators work on idents) and records
   // the other static chains that keep it alive. An edge that turns out to save nothing stays, at 0 bytes.
   cands.sort((a, b) => b.cut.uniqueBytes - a.cut.uniqueBytes);
-  cands.slice(0, EXACT_CHECK_LIMIT).forEach(({ cut, u, v }) => {
+  [...cands.slice(0, EXACT_CHECK_LIMIT), ...cands.slice(EXACT_CHECK_LIMIT).filter((c) => c.forceExact)].forEach(({ cut, u, v }) => {
     const without = parentsWithout(rg, (a, b) => a === u && b === v);
     const exact = lostBytes(rg, without);
     const also: string[][] = [];

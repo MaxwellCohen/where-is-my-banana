@@ -1,5 +1,5 @@
 import { packageNameFromPath } from "@wimb/graph-v1";
-import { chainFrom, type RouteGraph } from "./reach.js";
+import type { RouteGraph } from "./reach.js";
 import type { PackageRow } from "./types.js";
 
 export const PACKAGE_TABLE_LIMIT = 25;
@@ -15,8 +15,9 @@ export function packageTable(rgs: RouteGraph[], limit = PACKAGE_TABLE_LIMIT): Pa
       let e = perPkg.get(pkg);
       if (!e) perPkg.set(pkg, (e = { bytes: 0, importers: new Map() }));
       e.bytes += rg.bytes[i];
-      const owner = [...chainFrom(rg, rg.parent, i)].reverse().find((p) => !p.includes("node_modules/"));
-      if (owner) e.importers.set(owner, (e.importers.get(owner) ?? 0) + rg.bytes[i]);
+      let x = rg.parent[i];
+      while (x > 0 && rg.paths[x].includes("node_modules/")) x = rg.parent[x];
+      if (x > 0) e.importers.set(rg.paths[x], (e.importers.get(rg.paths[x]) ?? 0) + rg.bytes[i]);
     }
     for (const [pkg, e] of perPkg) {
       let a = agg.get(pkg);

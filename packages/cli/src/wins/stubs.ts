@@ -15,6 +15,9 @@ import type { Confidence, StubInfo, Win } from "./types.js";
 const FRAMEWORK = new Set(["next", "react", "react-dom", "scheduler"]);
 const NODE_BUILTINS_RE =
   /(?:require\(\s*|from\s*|import\(\s*)["'](?:node:)?(?:fs|fs\/promises|net|tls|child_process|dns|dgram|http2|worker_threads|cluster)["']/;
+/** Builtins that are legitimately polyfilled in browsers: only a signal when the package ships no `browser` mapping. */
+const WEAK_BUILTINS_RE =
+  /(?:require\(\s*|from\s*|import\(\s*)["'](?:node:)?(?:https?|crypto|zlib|stream|os|path|util|buffer)["']/;
 const MAX_SCAN_FILES = 6;
 const MAX_SCAN_BYTES = 300_000;
 
@@ -58,11 +61,17 @@ function readPkg(projectRoot: string, modulePath: string, cache: Map<string, Pkg
   return json;
 }
 
+function hasBrowserMapping(pkg: PkgJson): boolean {
+  if (pkg.browser !== undefined) return true;
+  return /"browser"\s*:/.test(JSON.stringify(pkg.exports ?? ""));
+}
+
 /** Strong signals mean "does not belong in a browser bundle"; the weak `sdk-name` only hints. */
 function nodeOnlySignals(name: string, pkg: PkgJson | null, files: string[]): { strong: string[]; weak: string[] } {
   const strong: string[] = [];
   const weak: string[] = [];
   if (/(^|[-/@._])node([-/._]|$)/.test(name)) strong.push("node-in-name");
+  if (/-server$/.test(name)) strong.push("server-in-name");
   if (/-sdk$/.test(name)) weak.push("sdk-name");
   if (pkg) {
     const b = pkg.browser;
@@ -74,6 +83,7 @@ function nodeOnlySignals(name: string, pkg: PkgJson | null, files: string[]): { 
     }
   }
   if (files.some((f) => NODE_BUILTINS_RE.test(f))) strong.push("node-builtins");
+  else if (pkg && !hasBrowserMapping(pkg) && files.some((f) => WEAK_BUILTINS_RE.test(f))) strong.push("node-builtins-no-browser");
   return { strong, weak };
 }
 
@@ -198,28 +208,38 @@ export function detectStubWins(graph: ParsedGraph, opts: StubOptions): Win[] {
     const cands: Cand[] = [];
     for (const [P, nodes] of byPkg) {
       const entries: Array<[number, number]> = [];
+      const appEntries: Array<[number, number]> = [];
       let direct = false;
       for (const v of nodes) {
         for (const u of rg.preds[v]) {
-          if (u === 0 || pkgOf[u] === null) direct = true; // seed or app code imports it itself
-          else if (pkgOf[u] !== P) entries.push([u, v]);
+          if (u === 0 || pkgOf[u] === null) {
+            direct = true; // seed or app code imports it itself
+            if (u > 0) appEntries.push([u, v]);
+          } else if (pkgOf[u] !== P) entries.push([u, v]);
         }
       }
-      if (direct || entries.length === 0) continue;
       const via = [...new Set(entries.map(([u]) => pkgOf[u]!))];
-      if (!via.every((a) => {
-        const u = entries.find(([x]) => pkgOf[x] === a)![0];
-        return readPkg(projectRoot, rg.paths[u], pkgCache)?.sideEffects === false;
-      })) continue;
+      // Not a sideEffects:false barrel leak: the package is imported directly (client component) or through
+      // barrels that aren't marked side-effect free. Still a candidate when strong node-only signals exist.
+      const broad =
+        direct ||
+        entries.length === 0 ||
+        !via.every((a) => {
+          const u = entries.find(([x]) => pkgOf[x] === a)![0];
+          return readPkg(projectRoot, rg.paths[u], pkgCache)?.sideEffects === false;
+        });
+      if (broad && entries.length + appEntries.length === 0) continue;
 
       const files = nodes.slice(0, MAX_SCAN_FILES).map((i) => readText(join(projectRoot, rg.paths[i])) ?? "");
       const sig = nodeOnlySignals(P, readPkg(projectRoot, rg.paths[nodes[0]], pkgCache), files);
       if (sig.strong.length + sig.weak.length === 0) continue;
 
+      if (broad && sig.strong.length === 0) continue;
+
       // Barrel check: every entry must be a re-export; if the app names an export that re-exports P, it's genuinely used.
-      let certain = true;
+      let certain = !broad;
       let blocked = true;
-      for (const [u, v] of entries) {
+      for (const [u, v] of broad ? [] : entries) {
         const re = reexportOf(readText(join(projectRoot, rg.paths[u])) ?? "", rg.paths[u], rg.paths[v], P);
         if (re.kind === "none") { blocked = false; break; }
         if (re.kind === "star") { certain = false; continue; }
@@ -236,9 +256,9 @@ export function detectStubWins(graph: ParsedGraph, opts: StubOptions): Win[] {
       const parent = parentsWithout(rg, (u, v) => pkgOf[v] === P && pkgOf[u] !== P);
       const lost = lostBytes(rg, parent);
       if (lost < minBytes) continue;
-      const [u0, v0] = entries[0];
+      const [u0, v0] = (broad ? [...appEntries, ...entries] : entries)[0];
       const info = stubInfo(P, via, [...sig.strong, ...sig.weak]);
-      const confidence: Confidence = certain && sig.strong.length > 0 ? "high" : sig.strong.length > 0 ? "medium" : "low";
+      const confidence: Confidence = broad ? "medium" : certain && sig.strong.length > 0 ? "high" : sig.strong.length > 0 ? "medium" : "low";
       cands.push({
         pkg: P,
         entries,

@@ -14,6 +14,7 @@ import { buildRouteGraph, type RouteGraph } from "./reach.js";
 import { accountLazy } from "./lazy.js";
 import { findBarrelDefeats } from "./barrels.js";
 import { packageTable } from "./packages.js";
+import { applyFailedPreviously, failedWinIds } from "./verify.js";
 import type { DynamicEdgeInfo, WinsReport } from "./types.js";
 
 export interface RunWinsOptions {
@@ -86,6 +87,7 @@ export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   const lazy = new Map<string, Awaited<ReturnType<typeof accountLazy>>>();
   for (const rg of rgs) lazy.set(rg.route, await accountLazy(rg, opts.projectRoot));
   const barrels = await findBarrelDefeats(rgs, wins, opts.projectRoot);
+  applyFailedPreviously(wins, failedWinIds(opts.projectRoot));
   sortWins(wins);
   const dynamicEdges: Record<string, DynamicEdgeInfo[]> = {};
   for (const [route, l] of lazy) if (l.edges.length) dynamicEdges[route] = l.edges;

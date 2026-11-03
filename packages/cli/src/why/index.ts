@@ -92,35 +92,43 @@ function analyzeRoute(rg: RouteGraph, matchedKeys: Set<string>, maxChains: numbe
   for (const t of rq) canReach[t] = 1;
   for (let q = 0; q < rq.length; q++) for (const p of rg.preds[rq[q]]) if (!canReach[p]) { canReach[p] = 1; rq.push(p); }
 
-  const shortestFrom = (start: number): number[] | null => {
-    const par = new Map<number, number>([[start, -1]]);
-    const bfs = [start];
-    for (let q = 0; q < bfs.length; q++) {
-      const u = bfs[q];
-      if (targets.has(u)) {
-        const path: number[] = [];
-        for (let x = u; x !== -1; x = par.get(x)!) path.push(x);
-        return path.reverse();
-      }
-      for (const v of rg.succ[u]) if (canReach[v] && !par.has(v)) { par.set(v, u); bfs.push(v); }
-    }
-    return null;
-  };
-
-  // One chain per distinct first hop (seed + its next module), shortest first.
-  const found = new Map<string, number[]>();
+  // One multi-source BFS from the root over nodes that can reach a target (parent pointers, typed arrays).
+  // Each node inherits the label of its first hop (seed + next module), so we get one shortest chain per
+  // distinct first hop without a search per hop. Targets are not expanded.
+  const par = new Int32Array(n).fill(-1);
+  const label = new Int32Array(n).fill(-1);
+  let nextLabel = 0;
+  const order: number[] = [];
   for (const seed of rg.succ[0]) {
-    if (!canReach[seed]) continue;
-    const hops = targets.has(seed) ? [seed] : rg.succ[seed].filter((h) => canReach[h]);
-    for (const h of hops) {
-      const path = shortestFrom(h);
-      if (!path) continue;
-      const full = targets.has(seed) ? path : [seed, ...path];
-      const key = `${seed}>${full[1] ?? ""}`;
-      if (!found.has(key) || found.get(key)!.length > full.length) found.set(key, full);
+    if (!canReach[seed] || par[seed] !== -1) continue;
+    par[seed] = 0;
+    label[seed] = nextLabel++;
+    order.push(seed);
+  }
+  const found = new Map<number, [number, number]>(); // label (first-hop order) -> [last non-target node (0 = none), target] (first = shortest)
+  for (let q = 0; q < order.length; q++) {
+    const u = order[q];
+    if (targets.has(u)) {
+      if (!found.has(label[u])) found.set(label[u], [0, u]);
+      continue;
+    }
+    const isSeed = par[u] === 0;
+    for (const v of rg.succ[u]) {
+      if (!canReach[v]) continue;
+      // A target already reached under another first hop still yields one chain per distinct hop.
+      if (par[v] !== -1 && targets.has(v) && !isSeed && !found.has(label[u])) found.set(label[u], [u, v]);
+      if (par[v] !== -1) continue;
+      par[v] = u;
+      label[v] = isSeed ? nextLabel++ : label[u];
+      order.push(v);
     }
   }
-  const ranked = [...found.values()].sort((a, b) => a.length - b.length).slice(0, maxChains);
+  const chainOf = ([u, t]: [number, number]): number[] => {
+    const out: number[] = u ? [t] : [];
+    for (let x = u || t; x > 0; x = par[x]) out.push(x);
+    return out.reverse();
+  };
+  const ranked = [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, e]) => chainOf(e)).sort((a, b) => a.length - b.length).slice(0, maxChains);
 
   const chains: WhyChain[] = ranked.map((nodes) => {
     // The cut an engineer can make: the last edge into the target on this chain (app-owned importer preferred).

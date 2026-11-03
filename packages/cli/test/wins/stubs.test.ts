@@ -88,20 +88,54 @@ describe("detectStubWins", () => {
     expect(detectStubWins(g, { projectRoot: root })).toEqual([]);
   });
 
-  it("negative: package not marked sideEffects:false", () => {
+  it("barrel not marked sideEffects:false still yields a medium-confidence candidate", () => {
     write(`${A}/package.json`, JSON.stringify({ name: "feature-kit" }));
     write(`${A}/dist/index.js`, `export * from "./ui.js";\nexport { init } from "vwo-fme-node-sdk";\n`);
     const g = synGraph(barrelMods("app/ok.tsx"), { "/": { seeds: ["page"], bytes: { ...route["/"].bytes, "app/ok.tsx": 500 } } });
-    expect(detectStubWins(g, { projectRoot: root })).toEqual([]);
+    const wins = detectStubWins(g, { projectRoot: root });
+    expect(wins).toHaveLength(1);
+    expect(wins[0].confidence).toBe("medium");
+    expect(wins[0].safety).toBe("needs-review");
     write(`${A}/package.json`, JSON.stringify({ name: "feature-kit", sideEffects: false }));
   });
 
-  it("negative: app code imports the package itself", () => {
+  it("app code importing the node-only package itself -> medium-confidence candidate", () => {
     write(`${A}/dist/index.js`, `export { init } from "vwo-fme-node-sdk";\n`);
     const g = synGraph(
       { ...barrelMods("app/ok.tsx"), page: { path: "app/ok.tsx", sync: ["kitIndex", "sdk"] } },
       { "/": { seeds: ["page"], bytes: { ...route["/"].bytes, "app/ok.tsx": 500 } } },
     );
+    const wins = detectStubWins(g, { projectRoot: root });
+    expect(wins).toHaveLength(1);
+    expect(wins[0].confidence).toBe("medium");
+    expect(wins[0].edge.importer).toBe("app/ok.tsx");
+    expect(wins[0].edit.replacementImport).toContain("resolveAlias");
+  });
+
+  it("package without a browser mapping that imports node builtins (https) is a candidate; with `browser` it is not", () => {
+    const Q = "node_modules/acme-core";
+    write(`${Q}/package.json`, JSON.stringify({ name: "acme-core", main: "index.js" }));
+    write(`${Q}/index.js`, `const https = require("https"); module.exports = https;`);
+    const qm = { page: { path: "app/ok.tsx", sync: ["q"] }, q: { path: `${Q}/index.js` } };
+    const g = synGraph(qm, { "/": { seeds: ["page"], bytes: { "app/ok.tsx": 500, [`${Q}/index.js`]: 62000 } } });
+    const wins = detectStubWins(g, { projectRoot: root });
+    expect(wins).toHaveLength(1);
+    expect(wins[0].stub!.signals).toContain("node-builtins-no-browser");
+    expect(wins[0].confidence).toBe("medium");
+    write(`${Q}/package.json`, JSON.stringify({ name: "acme-core", main: "index.js", browser: { "./index.js": "./browser.js" } }));
     expect(detectStubWins(g, { projectRoot: root })).toEqual([]);
+  });
+
+  it("name containing -server is a strong signal", () => {
+    const Q = "node_modules/acme-flags-server";
+    write(`${Q}/package.json`, JSON.stringify({ name: "acme-flags-server" }));
+    write(`${Q}/index.js`, `module.exports = {};`);
+    const g = synGraph(
+      { page: { path: "app/ok.tsx", sync: ["q"] }, q: { path: `${Q}/index.js` } },
+      { "/": { seeds: ["page"], bytes: { "app/ok.tsx": 500, [`${Q}/index.js`]: 30000 } } },
+    );
+    const wins = detectStubWins(g, { projectRoot: root });
+    expect(wins).toHaveLength(1);
+    expect(wins[0].stub!.signals).toContain("server-in-name");
   });
 });

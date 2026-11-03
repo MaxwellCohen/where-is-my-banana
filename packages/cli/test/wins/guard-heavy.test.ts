@@ -72,3 +72,45 @@ describe("test impact on lazy wins", () => {
     expect(w!.edit.verify).toContain("vitest run app/cond.test.tsx");
   });
 });
+
+describe("unified/remark/rehype pipeline", () => {
+  const FN = `import { unified } from "unified";\nimport remarkParse from "remark-parse";\nimport remarkRehype from "remark-rehype";\nimport rehypeStringify from "rehype-stringify";\nexport async function renderMd(md: string) {\n  const file = await unified().use(remarkParse).use(remarkRehype).use(rehypeStringify).process(md);\n  return String(file);\n}\n`;
+  const TOP = `import { unified } from "unified";\nimport remarkParse from "remark-parse";\nimport rehypeStringify from "rehype-stringify";\nexport const processor = unified().use(remarkParse).use(rehypeStringify);\n`;
+  const edge = (pkg: string) => att("lib/md.ts", `node_modules/${pkg}/index.js`, pkg);
+
+  it("guardKindFor covers the stack", async () => {
+    const { guardKindFor } = await import("../../src/wins/guard-heavy.js");
+    for (const p of ["unified", "remark-parse", "rehype-stringify", "micromark", "mdast-util-to-hast", "hast-util-to-html", "react-markdown", "markdown-it", "commonmark", "@mdx-js/mdx", "showdown"])
+      expect(guardKindFor(p), p).not.toBeNull();
+    expect(guardKindFor("lodash")).toBeNull();
+  });
+
+  it("function pipeline -> async wrapper with dynamic imports of the used plugins", async () => {
+    write("lib/md.ts", FN);
+    const [w] = await classifyWins(edge("unified"), { projectRoot: root, byteSource: "measured", framework: "next" });
+    expect(w.fixKind).toBe("guard-heavy");
+    const r = w.edit.replacementImport!;
+    expect(r).toContain("const MARKDOWN_HINT = /[*_#`\\[\\]<>\\\\~|]");
+    expect(r).toContain("if (!MARKDOWN_HINT.test(md)) return escapeHtml(md);");
+    expect(r).toContain("const [{ unified }, { default: remarkParse }, { default: remarkRehype }, { default: rehypeStringify }] = await Promise.all([import('unified'), import('remark-parse'), import('remark-rehype'), import('rehype-stringify')]);");
+    expect(r).toContain("unified().use(remarkParse).use(remarkRehype).use(rehypeStringify).process(md)");
+  });
+
+  it("a plugin import in the same file gets the same pipeline edit", async () => {
+    write("lib/md.ts", FN);
+    const [w] = await classifyWins(edge("remark-parse"), { projectRoot: root, byteSource: "measured", framework: "next" });
+    expect(w.fixKind).toBe("guard-heavy");
+    expect(w.edit.replacementImport).toContain("import('remark-parse')");
+  });
+
+  it("module-scope pipeline -> memoized lazy getProcessor()", async () => {
+    write("lib/md.ts", TOP);
+    const [w] = await classifyWins(edge("unified"), { projectRoot: root, byteSource: "measured", framework: "next" });
+    expect(w.fixKind).toBe("guard-heavy");
+    const r = w.edit.replacementImport!;
+    expect(r).toContain("let processorPromise;");
+    expect(r).toContain("export function getProcessor()");
+    expect(r).toContain("processorPromise ??=");
+    expect(r).toContain("return unified().use(remarkParse).use(rehypeStringify);");
+  });
+});

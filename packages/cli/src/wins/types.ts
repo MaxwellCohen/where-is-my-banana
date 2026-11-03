@@ -19,7 +19,8 @@ export type SafetyReason =
   | "net-negative-risk" // predicted saving is <= 0 or too small to outweigh the lazy-loading runtime
   | "client-stub" // stub-alias: breaks the client if it really calls the stubbed package
   | "behavior-change" // guard-heavy: pre-check path must produce the same output as the library
-  | "barrel-defeats-lazy"; // the module stays statically reachable through a barrel re-export
+  | "barrel-defeats-lazy" // the module stays statically reachable through a barrel re-export
+  | "failed-previously"; // `wimb verify` reverted this win earlier
 
 /** How likely the predicted saving is realized after the fix. */
 export type Confidence = "high" | "medium" | "low";
@@ -95,6 +96,8 @@ export interface Win {
   stub?: StubInfo;
   /** lazy only: bytes that move from first-load to preloaded (always-rendered, server-rendered component) instead of leaving the page */
   movesToPreloadedBytes?: number;
+  /** set by `wins` when `.wimb/verify.json` records a failed attempt of this win */
+  status?: "failed-previously";
   /** barrel re-export that keeps the target statically reachable */
   barrel?: BarrelWinInfo;
   /** tests that exercise the affected component (lazy / guard-heavy wins) */

@@ -9,9 +9,12 @@ interface GuardKind {
   note: string;
 }
 
+/** Cheap "does this text contain any markdown/HTML syntax?" test (source text of the regex literal). */
+export const MARKDOWN_HINT_SRC = "/[*_#`\\[\\]<>\\\\~|]|^\\s*(?:[-+]|\\d+\\.)\\s|\\n\\n/m";
+
 const MARKDOWN: GuardKind = {
   name: "MARKDOWN_HINT",
-  hint: "/[*_#`\\[\\]<>~|\\\\]|^\\s*(?:[-+]|\\d+\\.)\\s/m",
+  hint: MARKDOWN_HINT_SRC,
   fallback: "escapeHtml($)",
   note: "text without markdown/HTML syntax renders as escaped plain text",
 };
@@ -32,7 +35,7 @@ const DATE: GuardKind = { name: "HAS_VALUE", hint: "/\\S/", fallback: "''", note
 const YAML: GuardKind = { name: "YAML_HINT", hint: "/[:\\-\\[{]/", fallback: "null", note: "scalar-free text has no YAML structure" };
 
 const TABLE: [RegExp, GuardKind][] = [
-  [/^(marked|markdown-it|showdown|react-markdown|remark(-.+)?|micromark|snarkdown)$/, MARKDOWN],
+  [/^(marked|markdown-it(-.+)?|showdown|commonmark|react-markdown|snarkdown|unified|remark(-.+)?|rehype(-.+)?|micromark(-.+)?|mdast-.+|hast-.+|@mdx-js\/.+|mdx)$/, MARKDOWN],
   [/^(sanitize-html|dompurify|isomorphic-dompurify|xss)$/, SANITIZE],
   [/^(highlight\.js|prismjs|prism-react-renderer|shiki)$/, HIGHLIGHT],
   [/^(katex|mathjax.*)$/, MATH],

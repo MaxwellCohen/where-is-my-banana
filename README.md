@@ -77,11 +77,26 @@ Bump `packages/cli/package.json` version on `main`, then push a matching tag (`g
 - **Win**: an edge cut with a fix kind (`lazy`, `move-to-server`, `swap-package`, `deep-import`, `remove`, `stub-alias`) and a safety rating (`safe` or `needs-review` with reasons such as `above-the-fold`, `needs-ssr`).
 - `predictedSavedBytes` = measured saving minus the lazy-loading runtime (about 1.5 KB for `next/dynamic` when the route doesn't already ship it); `confidence` is `high|medium|low`. `alsoReachableVia` lists other static import chains that keep the module in the route (reason `static-elsewhere`); wins predicted at under 2 KB are `net-negative-risk`. Both are demoted to `needs-review` and excluded from `--fail-on-safe-wins`. Always verify with `--compare`.
 - `stub-alias` (reason `client-stub`): a node-only-looking package reached only through barrel re-exports of a `"sideEffects": false` package. The win carries a browser-only `turbopack.resolveAlias` / webpack client alias plus stub file content. Heuristic (regex over re-exports, not a full parse); check the client never calls it.
+- Lazy wins on always-rendered, server-rendered components only move bytes from first-load to preloaded: `predictedSavedBytes` is 0 (`net-negative-risk`, `needs-review`) and `movesToPreloadedBytes` says how much moves.
+- Next's injected `instrumentation-client` (plus `instrumentation`/`middleware`/`proxy` when client-bundled) is seeded as an entry of every route, so a package it imports statically yields `static-elsewhere` (low confidence) on lazy wins of that package.
+- `stub-alias` also fires (medium confidence) for packages with node-only signals (no `browser` mapping + node builtins, `-server`/`-node-` in the name) that are imported directly or via non-`sideEffects:false` barrels.
+- `guard-heavy` covers the unified/remark/rehype/micromark/mdast/hast/markdown-it/marked stack; a `unified().use(...)` pipeline gets a generated edit (async wrapper with dynamic imports, or a memoized `getProcessor()` at module scope).
 - `totalSavedBytes` sums a win across routes; `byteSource` says `measured` or `estimated`.
 
 ## Agent loop
 
-Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply `edit`, rebuild, run `wimb wins --compare .wimb/wins.prev.json`, keep only if the byte delta is realized.
+Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply `edit`, then run `wimb verify --win <id> --revert --accept`.
+
+```bash
+npx @maxwellcohen/wimb verify --init                       # once: baseline -> .wimb/wins.prev.json
+# ...apply one win's edit...
+npx @maxwellcohen/wimb verify --win <id> --revert --accept # rebuild, per-route first-load/preloaded/on-demand deltas
+```
+
+- Fails (exit 1) when any route's first-load rises by more than `--tolerance` (default 200 B), or the win's target routes don't improve. The verdict (`kept|failed|neutral`) is written to `.wimb/verify.json`; later `wins` runs mark failed ids `status: "failed-previously"` and demote them to `needs-review`.
+- `--revert` runs `git checkout --` on only the win's importer file plus any `--files <path>` (repeatable). It refuses untracked files and files that already had uncommitted changes when the baseline was taken (override: `--force-revert`). It never resets or cleans anything else.
+- `--accept` (on success) rotates the baseline: `.wimb/wins.json` -> `.wimb/wins.prev.json`. Baseline defaults to `.wimb/wins.prev.json`, falling back to `.wimb/wins.json`.
+- Same graph flags as `wins` (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`).
 
 ## CI budget
 
@@ -124,6 +139,15 @@ Reads `.wimb/wins.json`, sums the `<script src>` bytes (first-load) and `preload
 - `wins.md` has a "Barrels that defeat lazy loading" section (`barrels[]` in `wins.json`): a module that is lazy-loaded, or a proposed lazy win, that is still statically reachable through a barrel (`export * from`), with the importers (file:line) to rewrite to import the component file directly. Such wins get the `barrel-defeats-lazy` reason. `wimb speed` lists them as needs-review JS bundle items. Fix these first.
 - `guard-heavy` wins (markdown/sanitize/highlight/math/date/yaml libs called inside plain functions) keep a cheap regex pre-check and `await import()` the library only when needed. Always `needs-review` (`behavior-change`): compare outputs on sample inputs.
 - `lazy` and `guard-heavy` wins carry `testImpact`: tests that import the affected component (directly or one hop) with warnings (sync `getBy*` vs `findBy*`, fake timers, snapshots), the detected vitest/jest command (prepended to `verify`) and an optional `next/dynamic` setup mock.
+
+## Bytes by package
+
+```bash
+npx @maxwellcohen/wimb packages --top 25 [--route /x] [--json]
+npx @maxwellcohen/wimb packages --why moment   # same as `wimb why moment`: import chains + cut analysis
+```
+
+Uses one BFS with parent pointers per route and caps chains, so it stays fast on very large graphs.
 
 ## Other commands
 
@@ -183,3 +207,7 @@ Checks: `html-size`, `headers` (compression, cache, cookies, TTFB), `scripts` (+
 ## Note
 
 This is a vibe-coded proof-of-concept project. Expect rough edges.
+
+## Roadmap
+
+- Optional before/after screenshots and pixel diffs to catch visual regressions next to byte deltas (not built).
