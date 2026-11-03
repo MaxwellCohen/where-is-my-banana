@@ -108,3 +108,7 @@ npx @maxwellcohen/wimb wins --cwd . \
 ## Config
 
 `wimb.config.*` supports `thresholds`, `ignores` (`files`, `rules`) and `severityOverrides`.
+
+## Note
+
+This is a vibe-coded proof-of-concept project. Expect rough edges.
