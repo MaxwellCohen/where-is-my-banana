@@ -155,9 +155,27 @@ export async function buildGraphFromBinary(
         for (const d of modules.get(id)?.dependencies.sync ?? []) q.push(d);
       }
     };
+    // Modules only entered through import()/next/dynamic have no sync importer but are not entries.
+    const asyncOnly = new Set<string>();
+    for (const m of inRoute) for (const d of m.dependencies.async) if (ids.has(d) && !hasImporter.has(d) && d !== m.ident) asyncOnly.add(d);
+    const dynSeeds = seeds.filter((id) => asyncOnly.has(id));
+    if (dynSeeds.length < seeds.length) {
+      for (const id of dynSeeds) seeds.splice(seeds.indexOf(id), 1);
+    }
     walk(seeds);
+    const dynReached = new Set<string>();
+    const walkDyn = (from: string[]) => {
+      const q = [...from];
+      while (q.length) {
+        const id = q.pop()!;
+        if (dynReached.has(id)) continue;
+        dynReached.add(id);
+        for (const d of modules.get(id)?.dependencies.sync ?? []) q.push(d);
+      }
+    };
+    walkDyn(dynSeeds);
     for (const m of inRoute) {
-      if (!reached.has(m.ident)) {
+      if (!reached.has(m.ident) && !dynReached.has(m.ident)) {
         seeds.push(m.ident);
         walk([m.ident]);
       }

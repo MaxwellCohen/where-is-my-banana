@@ -17,10 +17,13 @@ import { loadConfig } from "./config.js";
 import { DEFAULT_VISUALIZER_URL, buildPayload, inlineUrl, launchBrowser, serveOnce } from "./open.js";
 import { runWins, runNextAnalyze, loadGraph } from "./wins/index.js";
 import { formatWhy, whyReport } from "./why/index.js";
+import { buildRouteGraph, type RouteGraph } from "./wins/reach.js";
+import { formatPackageTable, packageTable } from "./wins/packages.js";
 import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
 import type { WinsReport } from "./wins/types.js";
+import { formatValidationTerminal, runValidate, writeValidation } from "./wins/validate.js";
 import { parseSample, parseUrlFlag, runSpeed } from "./speed/index.js";
 
 function fail(err: unknown): void {
@@ -168,7 +171,8 @@ const vizCommand = defineCommand({
 const whyCommand = defineCommand({
   meta: { name: "why", description: "Explain why a package or file is in the client first-load bundle (import chains)" },
   args: {
-    target: { type: "positional", description: "Package name, path fragment or glob (e.g. moment, @scope/pkg, components/Chart.tsx, @scope/*)", required: true },
+    target: { type: "positional", description: "Package name, path fragment or glob (e.g. moment, @scope/pkg, components/Chart.tsx, @scope/*); omit with --table", required: false },
+    table: { type: "boolean", description: "Print the node_modules package table (package, KB, % of route, routes, top importer)", default: false },
     cwd: { type: "string", description: "Project root", default: process.cwd() },
     "analyze-export": { type: "string", description: "next analyze export JSONL (.jsonl or .jsonl.gz)" },
     "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
@@ -196,6 +200,13 @@ const whyCommand = defineCommand({
         vite,
         analyzed: args.analyze,
       });
+      if (!args.target) {
+        if (!args.table) throw new FlagError("why needs a <target> (or --table for the package table)");
+        const rgs = [...graph.routes.keys()].sort().map((r) => buildRouteGraph(graph, r)).filter((r): r is RouteGraph => !!r);
+        const rows = packageTable(rgs);
+        console.log(args.json ? JSON.stringify(rows, null, 2) : formatPackageTable(rows).join("\n"));
+        return process.stdout.write("", () => process.exit(0)) as unknown as void;
+      }
       report = whyReport(graph, args.target, { route: args.route, allRoutes: args["all-routes"], chains });
     } catch (err) {
       return fail(err);
@@ -218,6 +229,7 @@ const winsCommand = defineCommand({
     "min-bytes": { type: "string", description: "Drop edges saving fewer bytes than this" },
     top: { type: "string", description: "Number of wins to print", default: "10" },
     json: { type: "boolean", description: "Print WinsReport JSON to stdout", default: false },
+    packages: { type: "boolean", description: "Print the node_modules package table (top 25 in client first-load)", default: false },
     compare: { type: "string", description: "Previous wins.json to compare against" },
     "budget-route": { type: "string", description: "Fail if any route first-load exceeds this many bytes" },
     "fail-on-safe-wins": { type: "string", description: "Fail if safe wins exceed this many bytes" },
@@ -276,13 +288,17 @@ const winsCommand = defineCommand({
     }
     if (args.json) console.log(JSON.stringify(report, null, 2));
     else {
-      console.log(formatWinsTerminal(report, { top }));
+      console.log(formatWinsTerminal(report, { top, packages: args.packages }));
       console.log(`\nwimb: wrote ${jsonPath}, ${mdPath} and ${vizPath}`);
     }
     if (prev) {
       const cmp = compareWins(prev, report);
       console.error("wimb: first-load delta vs previous");
-      for (const r of cmp.routes) console.error(`  ${r.route}  ${r.delta >= 0 ? "+" : ""}${(r.delta / 1024).toFixed(1)} KB`);
+      for (const r of cmp.routes)
+        console.error(
+          `  ${r.route}  ${r.delta >= 0 ? "+" : ""}${(r.delta / 1024).toFixed(1)} KB` +
+            (r.preloadedDelta !== undefined ? `  (preloaded ${r.preloadedDelta >= 0 ? "+" : ""}${(r.preloadedDelta / 1024).toFixed(1)} KB)` : ""),
+        );
       console.error(`  wins resolved: ${cmp.resolved.length}, new: ${cmp.introduced.length}`);
     }
     const violations = checkBudget(report, { routeBudgetBytes, maxSafeWinBytes });
@@ -489,9 +505,61 @@ const liveCommand = defineCommand({
   },
 });
 
+const validateCommand = defineCommand({
+  meta: { name: "validate", description: "Compare wins.json route sizes against scripts in prerendered HTML (or a live URL)" },
+  args: {
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    wins: { type: "string", description: "Path to wins.json (default .wimb/wins.json)" },
+    "dist-dir": { type: "string", description: "distDir (default .next)" },
+    "html-dir": { type: "string", description: "Directory of exported HTML files" },
+    url: { type: "string", description: "Base URL to fetch route HTML and chunks from" },
+    tolerance: { type: "string", description: "Allowed diff, fraction (0.15) or percent (15)", default: "0.15" },
+    strict: { type: "boolean", description: "Exit 1 if any route is flagged", default: false },
+    json: { type: "boolean", description: "Print ValidationReport JSON to stdout", default: false },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let report: WinsReport;
+    let tolerance = 0.15;
+    try {
+      const file = resolve(projectRoot, args.wins ?? join(".wimb", "wins.json"));
+      let data: unknown;
+      try {
+        data = JSON.parse(readFileSync(file, "utf8"));
+      } catch {
+        throw new FlagError(`cannot read ${file}; run \`wimb wins\` first`);
+      }
+      report = validateWinsReport(data, file);
+      const t = parseNumberFlag("tolerance", args.tolerance);
+      if (t !== undefined) tolerance = t > 1 ? t / 100 : t;
+    } catch (err) {
+      return fail(err);
+    }
+    try {
+      const result = await runValidate({
+        projectRoot,
+        distDir: args["dist-dir"],
+        htmlDir: args["html-dir"] ? resolve(projectRoot, args["html-dir"]) : undefined,
+        url: args.url,
+        tolerance,
+        report,
+      });
+      report.validation = result;
+      writeWins(projectRoot, report);
+      writeValidation(projectRoot, result);
+      if (args.json) process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+      console.log(formatValidationTerminal(result));
+      const code = args.strict && result.flagged > 0 ? 1 : 0;
+      process.stdout.write("", () => process.exit(code));
+    } catch (err) {
+      fail(err);
+    }
+  },
+});
+
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, why: whyCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, why: whyCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand, validate: validateCommand },
 });
 
 runMain(main);

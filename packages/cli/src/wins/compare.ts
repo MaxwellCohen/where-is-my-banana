@@ -5,6 +5,10 @@ export interface RouteDelta {
   before: number;
   after: number;
   delta: number;
+  /** present when both reports carry dynamic accounting */
+  preloadedBefore?: number;
+  preloadedAfter?: number;
+  preloadedDelta?: number;
 }
 
 export interface WinsComparison {
@@ -16,12 +20,22 @@ export interface WinsComparison {
 export function compareWins(before: WinsReport, after: WinsReport): WinsComparison {
   const b = new Map(before.routes.map((r) => [r.route, r.firstLoadBytes]));
   const a = new Map(after.routes.map((r) => [r.route, r.firstLoadBytes]));
+  const bp = new Map(before.routes.map((r) => [r.route, r.preloadedBytes]));
+  const ap = new Map(after.routes.map((r) => [r.route, r.preloadedBytes]));
   const routes: RouteDelta[] = [];
   for (const route of [...new Set([...b.keys(), ...a.keys()])].sort()) {
     if (!b.has(route) || !a.has(route)) continue;
     const bb = b.get(route)!;
     const aa = a.get(route)!;
-    routes.push({ route, before: bb, after: aa, delta: aa - bb });
+    const pb = bp.get(route);
+    const pa = ap.get(route);
+    routes.push({
+      route,
+      before: bb,
+      after: aa,
+      delta: aa - bb,
+      ...(pb !== undefined && pa !== undefined ? { preloadedBefore: pb, preloadedAfter: pa, preloadedDelta: pa - pb } : {}),
+    });
   }
   const beforeIds = new Set(before.wins.map((w) => w.id));
   const afterIds = new Set(after.wins.map((w) => w.id));

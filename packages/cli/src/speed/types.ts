@@ -116,7 +116,16 @@ export interface RawWin {
   routes?: Record<string, number>;
   edit?: { summary?: string; replacementImport?: string; originalImport?: string; steps?: string[]; verify?: string };
 }
-export interface RawWins { wins?: RawWin[] }
+export interface RawBarrel {
+  target?: string;
+  barrel?: string;
+  kind?: string;
+  chain?: string[];
+  routes?: string[];
+  importers?: { file: string; line?: number }[];
+  fix?: string;
+}
+export interface RawWins { wins?: RawWin[]; barrels?: RawBarrel[] }
 
 export interface PlanInputs {
   audit?: RawAudit | null;

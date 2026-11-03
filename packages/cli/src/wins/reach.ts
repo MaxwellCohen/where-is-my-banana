@@ -2,9 +2,23 @@ import { normalizeModulePath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 
 /** Per-route static (sync) import graph with a virtual root (node 0) pointing at the route's seeds. */
+export interface DynamicRef {
+  /** node index of the (statically reachable) importer */
+  from: number;
+  importer: string;
+  imported: string;
+  /** bytes of the dynamic chunk closure first claimed by this edge (not in the static closure) */
+  bytes: number;
+  /** the target is ALSO in the static closure, so this dynamic import() buys nothing */
+  alsoStatic: boolean;
+}
+
 export interface RouteGraph {
   route: string;
+  /** compressed bytes of the static closure's client JS (dynamic-only chunks excluded) */
   firstLoadBytes: number;
+  /** async (import()/next/dynamic/React.lazy) edges leaving statically reachable modules */
+  dynamicRefs: DynamicRef[];
   idents: string[];
   succ: number[][];
   preds: number[][];
@@ -50,8 +64,8 @@ export function collectSeeds(graph: ParsedGraph, route: string): string[] {
 export function buildRouteGraph(graph: ParsedGraph, route: string): RouteGraph | null {
   const parts = graph.clientPartsByRoute.get(route);
   if (!parts) return null;
-  let firstLoadBytes = 0;
-  for (const b of parts.values()) firstLoadBytes += b;
+  let totalBytes = 0;
+  for (const b of parts.values()) totalBytes += b;
 
   const idents: string[] = [""];
   const index = new Map<string, number>();
@@ -100,7 +114,42 @@ export function buildRouteGraph(graph: ParsedGraph, route: string): RouteGraph |
   const preds: number[][] = Array.from({ length: n }, () => []);
   for (let u = 0; u < n; u++) for (const v of succ[u]) preds[v].push(u);
 
-  return { route, firstLoadBytes, idents, succ, preds, paths, bytes, pathBytes: parts, parent: bfsParents(succ, n) };
+  // Dynamic accounting: async edges out of the static closure. Chunks reachable only through them are
+  // not first-load JS (they are preloaded or on demand), so they are subtracted from the route total.
+  const staticPaths = new Set(paths.slice(1));
+  const claimed = new Set<string>();
+  const dynamicRefs: DynamicRef[] = [];
+  let dynamicBytes = 0;
+  for (let u = 1; u < n; u++) {
+    for (const dep of graph.modules.get(idents[u])?.dependencies.async ?? []) {
+      const dm = graph.modules.get(dep);
+      if (!dm) continue;
+      const dpath = normalizeModulePath(dm.path);
+      if (!dpath || dpath === paths[u]) continue;
+      if (staticPaths.has(dpath)) {
+        dynamicRefs.push({ from: u, importer: paths[u], imported: dpath, bytes: 0, alsoStatic: true });
+        continue;
+      }
+      let bytes = 0;
+      const seen = new Set<string>([dep]);
+      const st = [dep];
+      while (st.length) {
+        const m = graph.modules.get(st.pop()!);
+        if (!m) continue;
+        const mp = normalizeModulePath(m.path);
+        if (!staticPaths.has(mp) && !claimed.has(mp)) {
+          claimed.add(mp);
+          bytes += parts.get(mp) ?? 0;
+        }
+        for (const d of m.dependencies.sync) if (!seen.has(d)) { seen.add(d); st.push(d); }
+      }
+      dynamicBytes += bytes;
+      dynamicRefs.push({ from: u, importer: paths[u], imported: dpath, bytes, alsoStatic: false });
+    }
+  }
+  const firstLoadBytes = totalBytes - dynamicBytes;
+
+  return { route, firstLoadBytes, dynamicRefs, idents, succ, preds, paths, bytes, pathBytes: parts, parent: bfsParents(succ, n) };
 }
 
 function bfsParents(succ: number[][], n: number, skip?: (u: number, v: number) => boolean): number[] {

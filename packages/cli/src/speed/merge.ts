@@ -1,6 +1,6 @@
 import type {
   Effort, PageTypeRow, PlanCompare, PlanInputs, PlanItem, PlanOwner, PlanRisk, PlanSeverity, PlanSource,
-  RawFinding, RawWin, Theme,
+  RawBarrel, RawFinding, RawWin, Theme,
 } from "./types.js";
 
 const SEV: Record<PlanSeverity, number> = { high: 3, medium: 2, low: 1 };
@@ -234,6 +234,38 @@ function winItems(wins: RawWin[]): PlanItem[] {
   return out;
 }
 
+/** Barrels that keep lazy-load targets statically reachable: fix before the lazy wins. */
+function barrelItems(barrels: RawBarrel[]): PlanItem[] {
+  return barrels
+    .filter((b) => b.target && b.barrel)
+    .map((b) => {
+      const importers = (b.importers ?? []).map((i) => `${i.file}${i.line ? `:${i.line}` : ""}`);
+      return {
+        key: `wins:barrel-defeats-lazy:${b.barrel}:${b.target}`,
+        rank: 0,
+        source: "wins" as PlanSource,
+        sources: ["wins" as PlanSource],
+        corroborated: false,
+        theme: "JS bundle" as Theme,
+        title: `Barrel ${b.barrel} defeats lazy-loading of ${b.target}`,
+        why: `${b.target} is still reachable statically via ${b.barrel} (barrel)${b.kind === "already-lazy" ? ", so its dynamic import() saves nothing" : ", so lazy-loading it saves nothing"}.`,
+        impact: IMPACT["JS bundle"],
+        impactScore: clamp(45),
+        effort: "S" as Effort,
+        owner: "code" as PlanOwner,
+        severity: "medium" as PlanSeverity,
+        count: Math.max(1, importers.length),
+        files: uniq([b.barrel!, ...(b.importers ?? []).map((i) => i.file)]).slice(0, MAX_LOCATIONS),
+        exactInstructions: [
+          `Import ${b.target} directly from its component file (not from ${b.barrel}) in: ${importers.join(", ") || "the importers of the barrel"}.`,
+          `Or split ${b.barrel} so it no longer re-exports ${b.target}.`,
+        ],
+        verify: "npx --yes @maxwellcohen/wimb wins --compare .wimb/wins.json",
+        risk: "needs-review" as PlanRisk,
+      };
+    });
+}
+
 // ---- live -> items ---------------------------------------------------------
 
 const OWNER_PREFACE: Record<string, string> = {
@@ -299,7 +331,7 @@ export function priority(i: Pick<PlanItem, "impactScore" | "effort">): number {
 
 export function buildItems(inputs: PlanInputs): PlanItem[] {
   const audit = auditItems(inputs.audit?.findings ?? []);
-  const wins = winItems(inputs.wins?.wins ?? []);
+  const wins = [...barrelItems(inputs.wins?.barrels ?? []), ...winItems(inputs.wins?.wins ?? [])];
   const live = liveItems(inputs.live?.findings ?? []);
   const items: PlanItem[] = [...audit.map((a) => a.item), ...wins];
   const vendorMap = new Map(audit.map((a) => [a.item, a.vendors]));

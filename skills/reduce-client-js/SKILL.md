@@ -25,7 +25,11 @@ pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl
 - No local checkout: see `skills/run-wimb-npx`.
 - Optional tree view: `skills/visualize-analyze-export`.
 
+Also useful: `wimb wins --packages` (or `wimb why --table`) lists the heaviest node_modules packages and who imports them; `wimb why <pkg>` explains one.
+
 ## 2. Pick a win
+
+First read the "Barrels that defeat lazy loading" section of `.wimb/wins.md` (`barrels[]`): fix those first (import the component file directly in the listed importers, or split the barrel), because lazy wins on barrel-reachable modules save nothing. `routes[]` reports `firstLoadBytes` (static closure) plus `preloadedBytes`/`onDemandBytes`; a `lazy` win with `movesToPreloadedBytes` only shifts bytes from first-load to preloaded unless the component renders conditionally.
 
 Read `.wimb/wins.json` (`WinsReport`). Wins are sorted by `totalSavedBytes` desc. Take the first with `safety: "safe"`. Skip `needs-review` for now.
 
@@ -46,6 +50,12 @@ Edge cases:
 - **Event-handler-only** (`usage: "event-handler-only"`): do not use `next/dynamic`; load inside the handler with `const { X } = await import('pkg')`.
 - **Conditional render**: keep the condition; dynamic import goes at module top level, not inside the component.
 
+- `guard-heavy`: keep the cheap pre-check, `await import()` the library only when needed (`needs-review`, `behavior-change`): compare old/new output on sample inputs.
+
+For `lazy` and `guard-heavy` wins read `testImpact`: update/run the listed tests (sync `getBy*` becomes `await findBy*`, fake timers, snapshots) using `testImpact.command`; the optional `setupMock` makes `next/dynamic` resolve eagerly in tests.
+
+After the loop, `wimb validate` checks the graph numbers against the built route HTML (`--strict` to fail on >15% drift).
+
 ### Never edit `needs-review` without checking `safetyReasons`
 
 | Reason | Meaning | Check before editing |
@@ -57,6 +67,8 @@ Edge cases:
 | `already-in-suspense` | Already under a Suspense boundary | Likely already deferred; confirm the import is actually still sync in the graph before changing. |
 | `shared-with-eager-route` | Another route imports it eagerly | Saving is partial. Check `routes` and whether those routes can change too; expect a smaller delta. |
 | `static-elsewhere` | `alsoReachableVia` shows another static chain that keeps the module | Cutting this edge alone saves little or nothing. Cut or lazy-load those chains too, or skip. |
+| `barrel-defeats-lazy` | A barrel re-export keeps the module statically reachable | Rewrite the listed importers to import the component file directly, then re-run. |
+| `behavior-change` | `guard-heavy`: pre-check path replaces the library for trivial input | Verify output equality on sample inputs. |
 | `net-negative-risk` | `predictedSavedBytes` is under ~2 KB after the `next/dynamic` runtime | Skip unless the route already ships `next/dynamic`. |
 | `client-stub` | `stub-alias`: stub a server-only package out of the client bundle | Create the stub, add the browser-only alias (Turbopack `resolveAlias` / webpack `!isServer`), and confirm no client code calls the package; test the server path still works. |
 | `unresolved-usage` | No JSX or handler usage found | Open the file and find real usages (re-exports, props, refs) by hand. If unclear, skip. |

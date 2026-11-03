@@ -27,6 +27,8 @@ export interface ImportUsage {
   isPageOrLayout: boolean;
   found: boolean;
   unused: boolean;
+  /** position of the import statement in the importer */
+  importLoc?: { line: number; column: number };
 }
 
 const FN_TYPES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
@@ -178,6 +180,195 @@ export function moduleFacts(file: string, source: string): {
   };
 }
 
+function locOf(off: number, lines: string[]): { line: number; column: number } {
+  const loc = locFromOffset(off, lines);
+  return { line: loc.line, column: loc.column };
+}
+
+const offsetOf = (n: AstNode): number => (n.start ?? n.span?.start ?? 0) as number;
+const endOf = (n: AstNode): number => (n.end ?? n.span?.end ?? 0) as number;
+
+/** Line of the import/re-export statement in `source` that resolves to `edge.imported`. */
+export function findImportLine(importerPath: string, source: string, edge: EdgeRef): { line: number; column: number } | undefined {
+  try {
+    const { program } = parseSource(importerPath, source);
+    const lines = source.split("\n");
+    for (const st of program.body) {
+      const n = toAst(st);
+      if (!n.source || !/^(Import|Export)/.test(n.type)) continue;
+      if (matchesEdge(n.source.value ?? "", importerPath, edge)) return locOf(offsetOf(n), lines);
+    }
+  } catch {
+    // unparsable
+  }
+  return undefined;
+}
+
+/** Barrel: a module whose body is mostly `export * from` / `export { x } from` re-exports. */
+export function isBarrelSource(file: string, source: string): boolean {
+  try {
+    const { program } = parseSource(file, source);
+    let reexports = 0;
+    let other = 0;
+    for (const st of program.body) {
+      const n = toAst(st);
+      if (n.type === "ImportDeclaration") continue;
+      if (n.type === "ExpressionStatement" && n.directive) continue;
+      if ((n.type === "ExportAllDeclaration" || n.type === "ExportNamedDeclaration") && n.source) reexports++;
+      else other++;
+    }
+    return reexports >= 2 && reexports >= other * 1.5;
+  } catch {
+    return false;
+  }
+}
+
+export interface DynamicUsage {
+  found: boolean;
+  /** wrapped in next/dynamic / React.lazy / lazy() bound to a variable */
+  wrapped: boolean;
+  ssrFalse: boolean;
+  usage: UsageKind;
+}
+
+const LAZY_WRAPPERS = new Set(["dynamic", "lazy", "defineAsyncComponent"]);
+
+/** How a dynamic `import('x')` that resolves to `edge.imported` is used inside `importerPath`. */
+export function analyzeDynamicUsage(importerPath: string, source: string, edge: EdgeRef): DynamicUsage {
+  const none: DynamicUsage = { found: false, wrapped: false, ssrFalse: false, usage: "unknown" };
+  let program;
+  try {
+    program = parseSource(importerPath, source).program;
+  } catch {
+    return none;
+  }
+  let hit: { node: AstNode; ancestors: AstNode[] } | null = null;
+  const stack: AstNode[] = [];
+  const visit = (node: AstNode) => {
+    if (hit) return;
+    if (node.type === "ImportExpression" && typeof node.source?.value === "string" && matchesEdge(node.source.value, importerPath, edge)) {
+      hit = { node, ancestors: [...stack] };
+      return;
+    }
+    stack.push(node);
+    for (const key of Object.keys(node)) {
+      const val = node[key];
+      if (!val || typeof val !== "object") continue;
+      if (Array.isArray(val)) {
+        for (const c of val) if (c && typeof c === "object" && "type" in c) visit(c as AstNode);
+      } else if ("type" in val) visit(val as AstNode);
+    }
+    stack.pop();
+  };
+  visit(toAst(program));
+  if (!hit) return none;
+  const { ancestors } = hit as { node: AstNode; ancestors: AstNode[] };
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const call = ancestors[i]!;
+    if (call.type !== "CallExpression") continue;
+    const callee = call.callee;
+    const name = callee?.type === "Identifier" ? callee.name : callee?.type === "MemberExpression" ? callee.property?.name : undefined;
+    if (!name || !LAZY_WRAPPERS.has(name)) continue;
+    const opts = call.arguments?.[1];
+    const ssrFalse = !!opts?.properties?.some(
+      (p: AstNode) => (p.key?.name ?? p.key?.value) === "ssr" && p.value?.type === "Literal" && p.value.value === false,
+    );
+    const decl = ancestors[i - 1];
+    const local = decl?.type === "VariableDeclarator" && decl.id?.type === "Identifier" ? (decl.id.name as string) : null;
+    if (!local) return { found: true, wrapped: true, ssrFalse, usage: "unknown" };
+    const refs = collectRefs(toAst(program), new Set([local])).filter((r) => r.ancestors[r.ancestors.length - 1] !== decl);
+    if (refs.length === 0) return { found: true, wrapped: true, ssrFalse, usage: "event-handler-only" };
+    const kinds = refs.map(classifyRef);
+    const usage: UsageKind = kinds.includes("always-rendered")
+      ? "always-rendered"
+      : kinds.includes("unknown")
+        ? "unknown"
+        : kinds.includes("conditional-render")
+          ? "conditional-render"
+          : "event-handler-only";
+    return { found: true, wrapped: true, ssrFalse, usage };
+  }
+  return { found: true, wrapped: false, ssrFalse: false, usage: "event-handler-only" };
+}
+
+export interface GuardCandidate {
+  binding: Binding;
+  specifier: string;
+  /** source of the first call, its callee and first argument */
+  callSrc: string;
+  calleeSrc: string;
+  argSrc: string;
+  fnName: string | null;
+  fnAsync: boolean;
+  loc: { line: number; column: number };
+}
+
+/**
+ * A heavy library used only through calls inside plain (non-component, non-hook) functions:
+ * the call site can be guarded by a cheap pre-check and the library imported on demand.
+ */
+export function findGuardCandidate(importerPath: string, source: string, edge: EdgeRef): GuardCandidate | null {
+  let program;
+  try {
+    program = parseSource(importerPath, source).program;
+  } catch {
+    return null;
+  }
+  const lines = source.split("\n");
+  let decl: AstNode | null = null;
+  for (const st of program.body) {
+    const n = toAst(st);
+    if (n.type === "ImportDeclaration" && n.importKind !== "type" && matchesEdge(n.source?.value ?? "", importerPath, edge)) {
+      decl = n;
+      break;
+    }
+  }
+  if (!decl) return null;
+  const bindings: Binding[] = [];
+  for (const sp of decl.specifiers ?? []) {
+    if (sp.importKind === "type") continue;
+    const local = sp.local?.name as string;
+    if (sp.type === "ImportDefaultSpecifier") bindings.push({ local, kind: "default", imported: "default" });
+    else if (sp.type === "ImportNamespaceSpecifier") bindings.push({ local, kind: "namespace", imported: "*" });
+    else bindings.push({ local, kind: "named", imported: sp.imported?.name ?? sp.imported?.value ?? local });
+  }
+  if (bindings.length !== 1) return null;
+  const refs = collectRefs(toAst(program), new Set([bindings[0]!.local]));
+  if (refs.length === 0) return null;
+  let first: GuardCandidate | null = null;
+  for (const ref of refs) {
+    if (ref.jsx) return null;
+    const a = ref.ancestors;
+    const parent = a[a.length - 1];
+    let call: AstNode | undefined;
+    if (parent?.type === "CallExpression" && parent.callee === ref.node) call = parent;
+    else if (parent?.type === "MemberExpression" && parent.object === ref.node && a[a.length - 2]?.type === "CallExpression" && a[a.length - 2]!.callee === parent) call = a[a.length - 2];
+    if (!call) return null;
+    let fnIdx = -1;
+    for (let i = a.length - 1; i >= 0; i--) if (FN_TYPES.has(a[i]!.type)) { fnIdx = i; break; }
+    if (fnIdx < 0) return null; // module-level call: runs on load
+    const fn = a[fnIdx]!;
+    const above = a[fnIdx - 1];
+    const fnName: string | null =
+      fn.id?.name ?? (above?.type === "VariableDeclarator" && above.id?.type === "Identifier" ? above.id.name : null) ?? ((above?.type === "MethodDefinition" || above?.type === "Property") && above.key?.name) ?? null;
+    const fnAsync = !!fn.async;
+    if (fnName ? (/^[A-Z]/.test(fnName) || /^use[A-Z]/.test(fnName)) && !fnAsync : !fnAsync) return null; // component / hook / anonymous render-time callback
+    if (!first) {
+      first = {
+        binding: bindings[0]!,
+        specifier: decl.source.value,
+        callSrc: source.slice(offsetOf(call), endOf(call)),
+        calleeSrc: source.slice(offsetOf(call.callee), endOf(call.callee)),
+        argSrc: call.arguments?.[0] ? source.slice(offsetOf(call.arguments[0]), endOf(call.arguments[0])) : "",
+        fnName,
+        fnAsync,
+        loc: locOf(offsetOf(call), lines),
+      };
+    }
+  }
+  return first;
+}
+
 export function analyzeImportUsage(importerPath: string, source: string, edge: EdgeRef): ImportUsage {
   const empty: ImportUsage = {
     usage: "unknown",
@@ -229,6 +420,7 @@ export function analyzeImportUsage(importerPath: string, source: string, edge: E
     specifier: decl.source.value,
     originalImport: source.slice(decl.start, decl.end),
     typeOnly: decl.importKind === "type",
+    importLoc: locOf(decl.start ?? decl.span?.start ?? 0, lines),
   };
   if (res.typeOnly) return res;
 

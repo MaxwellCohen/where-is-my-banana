@@ -10,7 +10,11 @@ import { nextHasAnalyze, runNext } from "./next-cli.js";
 import { attributeRoutes } from "./attribute.js";
 import { classifyWins, detectFramework, sortWins } from "./classify.js";
 import { detectStubWins } from "./stubs.js";
-import type { WinsReport } from "./types.js";
+import { buildRouteGraph, type RouteGraph } from "./reach.js";
+import { accountLazy } from "./lazy.js";
+import { findBarrelDefeats } from "./barrels.js";
+import { packageTable } from "./packages.js";
+import type { DynamicEdgeInfo, WinsReport } from "./types.js";
 
 export interface RunWinsOptions {
   projectRoot: string;
@@ -78,13 +82,25 @@ export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   if (attributions.length === 0) throw new Error(NO_ATTRIBUTION_MESSAGE);
   const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured", framework: detectFramework(opts.projectRoot) });
   wins.push(...detectStubWins(graph, { projectRoot: opts.projectRoot, minBytes: opts.minBytes }));
+  const rgs = attributions.map((a) => buildRouteGraph(graph, a.route)).filter((r): r is RouteGraph => !!r);
+  const lazy = new Map<string, Awaited<ReturnType<typeof accountLazy>>>();
+  for (const rg of rgs) lazy.set(rg.route, await accountLazy(rg, opts.projectRoot));
+  const barrels = await findBarrelDefeats(rgs, wins, opts.projectRoot);
   sortWins(wins);
+  const dynamicEdges: Record<string, DynamicEdgeInfo[]> = {};
+  for (const [route, l] of lazy) if (l.edges.length) dynamicEdges[route] = l.edges;
   return {
     version: "2",
     timestamp: new Date().toISOString(),
     projectRoot: opts.projectRoot,
     byteSource: "measured",
-    routes: attributions.map((a) => ({ route: a.route, firstLoadBytes: a.firstLoadBytes })),
+    routes: attributions.map((a) => {
+      const l = lazy.get(a.route);
+      return { route: a.route, firstLoadBytes: a.firstLoadBytes, ...(l ? { preloadedBytes: l.preloadedBytes, onDemandBytes: l.onDemandBytes } : {}) };
+    }),
     wins,
+    packages: packageTable(rgs),
+    ...(barrels.length ? { barrels } : {}),
+    ...(Object.keys(dynamicEdges).length ? { dynamicEdges } : {}),
   };
 }

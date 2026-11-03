@@ -103,9 +103,31 @@ npx @maxwellcohen/wimb why moment --cwd .          # package, path fragment or g
 
 Prints the shortest import chain from the route entry, subtree/unique bytes, and up to `--chains N` (default 3) alternative chains with distinct first hops, each with the edge to cut and whether other chains keep it alive. Flags: `--route <substr>`, `--all-routes`, `--json`, plus the `wins` data flags (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`). Exits 1 if it is not in the client graph (says so when it is server-only).
 
+`wimb why --table` (no target) and `wimb wins --packages` print the node_modules packages in client first-load: package, gzip KB, % of route, route count and the top first-party importer (top 25; also `packages[]` in `wins.json` and a table in `wins.md`).
+
+## First-load vs preloaded vs on-demand
+
+Route first-load is the static import closure only. Dynamic chunks (`import()`, `next/dynamic`, `React.lazy`) are reported separately as `preloadedBytes` (server-rendered, unconditional dynamic components, which Next still preloads) and `onDemandBytes` (conditional, handler-only, `ssr:false`, library-internal). A `lazy` win on an always-rendered component only moves bytes from first-load to preloaded (`movesToPreloadedBytes`); the real transfer saving needs the component to render conditionally. `--compare` shows preloaded deltas too. Older reports without these fields still load.
+
+## Validate against the real build
+
+```bash
+npx @maxwellcohen/wimb validate --cwd .                   # .next/server/{app,pages}/*.html
+npx @maxwellcohen/wimb validate --html-dir out/ --tolerance 0.15 --strict
+npx @maxwellcohen/wimb validate --url https://staging.example.com   # polite sequential GETs
+```
+
+Reads `.wimb/wins.json`, sums the `<script src>` bytes (first-load) and `preload`/`modulepreload`-only chunks referenced in each route's HTML (raw + gzip), compares gzip to the graph `firstLoadBytes`, and flags routes off by more than the tolerance (default 15%) with likely reasons (compression mismatch, dynamic preloads, framework/polyfill chunks, route not prerendered). Writes `.wimb/validation.json` and a Validation section in `wins.md`; exits 1 only with `--strict`.
+
+## Barrels, guard-heavy, test impact
+
+- `wins.md` has a "Barrels that defeat lazy loading" section (`barrels[]` in `wins.json`): a module that is lazy-loaded, or a proposed lazy win, that is still statically reachable through a barrel (`export * from`), with the importers (file:line) to rewrite to import the component file directly. Such wins get the `barrel-defeats-lazy` reason. `wimb speed` lists them as needs-review JS bundle items. Fix these first.
+- `guard-heavy` wins (markdown/sanitize/highlight/math/date/yaml libs called inside plain functions) keep a cheap regex pre-check and `await import()` the library only when needed. Always `needs-review` (`behavior-change`): compare outputs on sample inputs.
+- `lazy` and `guard-heavy` wins carry `testImpact`: tests that import the affected component (directly or one hop) with warnings (sync `getBy*` vs `findBy*`, fake timers, snapshots), the detected vitest/jest command (prepended to `verify`) and an optional `next/dynamic` setup mock.
+
 ## Other commands
 
-- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`. Invalid flag values exit 2.
+- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`, `--packages`. Invalid flag values exit 2. `wimb validate` flags: `--cwd`, `--wins`, `--dist-dir`, `--html-dir`, `--url`, `--tolerance`, `--strict`, `--json`.
 - `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
 - `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
 

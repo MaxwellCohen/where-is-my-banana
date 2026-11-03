@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { loadDataTables } from "../data/index.js";
 import { loadReplacements } from "../external/module-replacements.js";
-import { analyzeImportUsage, moduleFacts, type ImportUsage } from "./usage-analyze.js";
+import { analyzeImportUsage, findGuardCandidate, moduleFacts, type GuardCandidate, type ImportUsage } from "./usage-analyze.js";
+import { buildGuardEdit, guardKindFor } from "./guard-heavy.js";
+import { attachTestImpact } from "./test-impact.js";
 import type {
   Confidence,
   EdgeCut,
@@ -115,6 +117,7 @@ async function readText(path: string): Promise<string | null> {
   }
 }
 
+const kb = (n: number) => (n / 1024).toFixed(1);
 const isIdent = (s: string) => /^[A-Za-z_$][\w$]*$/.test(s);
 
 const LAZY_IMPORT: Partial<Record<Framework, string>> = {
@@ -206,10 +209,15 @@ export async function classifyWins(
     const swapTarget = isPackage ? replacements.get(edge.packageName!) : undefined;
     const isHeavy = isPackage && data.heavyPackages.has(edge.packageName!);
     const deferredUse = usage === "conditional-render" || usage === "event-handler-only";
+    const guard: GuardCandidate | null =
+      isPackage && importerSrc && !isRemove && usage !== "event-handler-only" && guardKindFor(edge.packageName!)
+        ? findGuardCandidate(edge.importer, importerSrc, edge)
+        : null;
 
     let fixKind: FixKind | null = null;
     if (isRemove) fixKind = "remove";
     else if (namedFromRoot && data.barrelPackages.has(edge.packageName!)) fixKind = "deep-import";
+    else if (guard) fixKind = "guard-heavy";
     else if (isPackage && (isHeavy || swapTarget) && !deferredUse) fixKind = "swap-package";
     else if (
       !isPackage &&
@@ -257,7 +265,20 @@ export async function classifyWins(
     else if (fixKind === "lazy" && (usage === "conditional-render" || predicted < MIN_PREDICTED_SAVING_BYTES * 2)) confidence = "medium";
     if (g.alsoReachableVia?.length && total === 0) predicted = 0;
 
-    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement);
+    if (fixKind === "guard-heavy") {
+      reasons.add("behavior-change");
+      if (confidence === "high") confidence = "medium";
+    }
+
+    // Lazy-loading an always-rendered component in a server-rendered importer only moves it from first-load to
+    // "preloaded": Next still emits preload tags for its chunk, so the transfer saving is small.
+    const movesToPreloaded = fixKind === "lazy" && (usage === "always-rendered" || usage === "unknown") && !!u?.found && total > 0;
+
+    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard);
+    if (movesToPreloaded) {
+      edit.summary += ` (moves ${kb(total)} KB from first-load to preloaded; real saving only if the component is conditional)`;
+      edit.steps.push("This only moves bytes from first-load to preloaded: the dynamic chunk is still preloaded on server render. Real transfer savings need the component to render conditionally (tab, modal, below-the-fold); otherwise the gain is parse/hydrate time.");
+    }
     wins.push({
       id: `${fixKind}:${edge.importer}:${edge.imported}`,
       fixKind,
@@ -265,7 +286,7 @@ export async function classifyWins(
       safetyReasons: [...reasons],
       usage,
       edge,
-      loc: g.cut.loc,
+      loc: g.cut.loc ?? u?.importLoc,
       usageLoc: u?.usageLoc,
       routes: g.routes,
       totalSavedBytes: total,
@@ -275,10 +296,12 @@ export async function classifyWins(
       ...(g.alsoReachableVia ? { alsoReachableVia: g.alsoReachableVia } : {}),
       predictedSavedBytes: predicted,
       confidence,
+      ...(movesToPreloaded ? { movesToPreloadedBytes: total } : {}),
     });
   }
 
   sortWins(wins);
+  await attachTestImpact(wins, ctx.projectRoot);
   return wins;
 }
 
@@ -299,6 +322,7 @@ function buildEdit(
   ctx: ClassifyContext,
   routes: string[],
   replacement: string | undefined,
+  guard: GuardCandidate | null = null,
 ): WinEdit {
   const target = edge.packageName ?? edge.imported;
   const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare .wimb/wins.json  # rebuild + compare routes: ${routes.join(", ")}`;
@@ -342,6 +366,16 @@ function buildEdit(
         ],
         verify,
       };
+    case "guard-heavy": {
+      const g = guard && edge.packageName ? buildGuardEdit(edge.packageName, guard, file) : null;
+      return {
+        summary: g?.summary ?? `Guard ${target} behind a cheap pre-check in ${file}`,
+        originalImport: original,
+        replacementImport: g?.replacementImport,
+        steps: g?.steps ?? [`Add a cheap pre-check before calling ${target} in ${file} and import it on demand.`],
+        verify,
+      };
+    }
     case "move-to-server":
       return {
         summary: `Render ${edge.imported} from a Server Component instead of the "use client" file ${file}`,

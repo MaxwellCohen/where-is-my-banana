@@ -1,6 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Win, WinsReport } from "./types.js";
+import { formatBarrelsMarkdown } from "./barrels.js";
+import { formatPackageMarkdown, formatPackageTable } from "./packages.js";
+import { formatTestImpactMarkdown } from "./test-impact.js";
+import { formatValidationMarkdown } from "./validate.js";
 
 const kb = (n: number) => (n / 1024).toFixed(1);
 /** What to expect after the fix (older reports have only totalSavedBytes). */
@@ -53,12 +57,21 @@ export function writeWins(root: string, report: WinsReport): { jsonPath: string;
   return { jsonPath, mdPath };
 }
 
-export function formatWinsTerminal(report: WinsReport, opts: { top?: number } = {}): string {
+const lazyNote = (r: WinsReport["routes"][number], sep: string) =>
+  r.preloadedBytes || r.onDemandBytes ? `${sep}+${kb(r.preloadedBytes ?? 0)} KB preloaded, ${kb(r.onDemandBytes ?? 0)} KB on-demand` : "";
+
+export function formatWinsTerminal(report: WinsReport, opts: { top?: number; packages?: boolean } = {}): string {
   const top = opts.top ?? 10;
   const lines: string[] = [];
-  lines.push("Route first-load JS:");
-  for (const r of report.routes) lines.push(`  ${r.route}  ${kb(r.firstLoadBytes)} KB`);
+  lines.push("Route first-load JS (static closure; dynamic chunks listed separately):");
+  for (const r of report.routes) lines.push(`  ${r.route}  ${kb(r.firstLoadBytes)} KB${lazyNote(r, "  ")}`);
   lines.push("");
+  if (opts.packages) lines.push(...formatPackageTable(report.packages ?? []), "");
+  if (report.barrels?.length) {
+    lines.push("Barrels that defeat lazy loading:");
+    for (const b of report.barrels) lines.push(`  ${b.target} is still reachable statically via ${b.barrel} (barrel); importers: ${b.importers.map((i) => `${i.file}${i.line ? `:${i.line}` : ""}`).join(", ") || "-"}`);
+    lines.push("");
+  }
   const wins = report.wins.slice(0, top);
   if (wins.length === 0) {
     lines.push("No wins found.");
@@ -83,6 +96,8 @@ export function formatWinsTerminal(report: WinsReport, opts: { top?: number } = 
   });
   lines.push(...table(rows, 4, !!process.stdout.isTTY));
   wins.forEach((w, i) => {
+    if (w.movesToPreloadedBytes) lines.push(`  #${i + 1} moves ${kb(w.movesToPreloadedBytes)} KB from first-load to preloaded; real saving only if the component is conditional`);
+    if (w.testImpact) lines.push(`  #${i + 1} update/run tests: ${w.testImpact.files.join(", ")}`);
     if (w.alsoReachableVia?.length) lines.push(`  #${i + 1} also statically reachable via ${viaText(w.alsoReachableVia)}`);
     if (w.predictedSavedBytes !== undefined && w.predictedSavedBytes < w.totalSavedBytes)
       lines.push(`  #${i + 1} measured ${kb(w.totalSavedBytes)} KB, predicted ${kb(w.predictedSavedBytes)} KB after lazy-loading runtime`);
@@ -95,9 +110,19 @@ export function formatWinsMarkdown(report: WinsReport): string {
   const out: string[] = [];
   out.push("# wimb wins", "");
   out.push(`Byte source: ${report.byteSource}`, "");
-  out.push("## Route first-load JS", "", "| Route | First load (KB) |", "| --- | ---: |");
-  for (const r of report.routes) out.push(`| ${r.route} | ${kb(r.firstLoadBytes)} |`);
-  out.push("", "## Top wins", "");
+  out.push("## Route first-load JS", "", "First load = static import closure only. Preloaded = dynamic chunks Next still preloads on server render (unconditional dynamic components). On-demand = fetched only when needed.", "");
+  out.push("| Route | First load (KB) | Preloaded (KB) | On-demand (KB) |", "| --- | ---: | ---: | ---: |");
+  for (const r of report.routes) out.push(`| ${r.route} | ${kb(r.firstLoadBytes)} | ${r.preloadedBytes === undefined ? "-" : kb(r.preloadedBytes)} | ${r.onDemandBytes === undefined ? "-" : kb(r.onDemandBytes)} |`);
+  out.push("");
+  for (const [route, edges] of Object.entries(report.dynamicEdges ?? {})) {
+    out.push(`Dynamic chunks on ${route}:`, "");
+    for (const e of edges.slice(0, 10)) out.push(`- ${e.kind} ${kb(e.bytes)} KB: \`${e.imported}\` (from \`${e.importer}\`; ${e.reason})`);
+    out.push("");
+  }
+  if (report.packages) out.push(...formatPackageMarkdown(report.packages));
+  out.push(...formatBarrelsMarkdown(report.barrels ?? []));
+  if (report.validation) out.push(...formatValidationMarkdown(report.validation), "");
+  out.push("## Top wins", "");
   if (report.wins.length === 0) {
     out.push("No wins found.", "");
     return out.join("\n");
@@ -119,6 +144,8 @@ export function formatWinsMarkdown(report: WinsReport): string {
       out.push("- Also statically reachable via (cutting this edge alone will not remove it):");
       for (const c of w.alsoReachableVia) out.push(`  - ${c.join(" -> ")}`);
     }
+    if (w.movesToPreloadedBytes) out.push(`- Moves ${kb(w.movesToPreloadedBytes)} KB from first-load to preloaded; real saving only if the component is conditional`);
+    if (w.barrel) out.push(`- ${w.edge.imported} is still reachable statically via ${w.barrel.barrel} (barrel); rewrite importers: ${w.barrel.importers.map((i) => `${i.file}${i.line ? `:${i.line}` : ""}`).join(", ") || "-"}`);
     out.push(`- Usage: ${w.usage}`);
     out.push(
       `- Routes: ${Object.entries(w.routes)
@@ -137,6 +164,7 @@ export function formatWinsMarkdown(report: WinsReport): string {
     } else if (w.edit.originalImport) out.push("```ts", `- ${w.edit.originalImport}`, ...(w.edit.replacementImport ? [`+ ${w.edit.replacementImport}`] : []), "```", "");
     else if (w.edit.replacementImport) out.push("```ts", w.edit.replacementImport, "```", "");
     if (w.edit.steps.length) out.push(...w.edit.steps.map((s, n) => `${n + 1}. ${s}`), "");
+    out.push(...formatTestImpactMarkdown(w));
     out.push(`Verify: \`${w.edit.verify}\``, "");
   });
   return out.join("\n");
