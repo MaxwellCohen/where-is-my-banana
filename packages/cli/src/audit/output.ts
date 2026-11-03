@@ -80,7 +80,29 @@ export function formatAuditMarkdown(report: AuditReport, top = 10): string {
       L.push("");
     }
   }
+  L.push(...splitTable(report.findings));
   return L.join("\n");
+}
+
+/** "Files worth breaking up": top split-candidate files (one row per file) with the facts behind them. */
+export function splitTable(findings: Finding[], n = 15): string[] {
+  const byFile = new Map<string, Finding>();
+  for (const f of findings) {
+    if (f.check !== "split-candidate" || !f.evidence) continue;
+    const key = `${f.package ?? ""}|${f.file}`;
+    const cur = byFile.get(key);
+    if (!cur || RANK[f.severity] < RANK[cur.severity] || (RANK[f.severity] === RANK[cur.severity] && (f.impactScore ?? 0) > (cur.impactScore ?? 0))) byFile.set(key, f);
+  }
+  const rows = [...byFile.values()].sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0) || b.evidence!.loc - a.evidence!.loc).slice(0, n);
+  if (!rows.length) return [];
+  const L = ["## Files worth breaking up", "", `Top ${rows.length} by impact. Clusters = groups of declarations sharing no local state/helpers; heavy imports are packages only one cluster needs. Details and the split plan are in the findings above and in audit.json.`, ""];
+  L.push("| File | LOC | Decls | Clusters | Heavy imports unique to a cluster | Client? | Est. KB |", "| --- | ---: | ---: | ---: | --- | --- | ---: |");
+  for (const f of rows) {
+    const e = f.evidence!;
+    L.push(`| \`${f.file}\`${f.package ? ` [${f.package}]` : ""} | ${e.loc} | ${e.declarations} | ${e.clusters.length} | ${e.uniqueHeavy.join(", ") || "-"} | ${e.client ? "use client" : e.clientReachable ? "reachable" : "server"} | ${e.measuredKB ?? "-"} |`);
+  }
+  L.push("");
+  return L;
 }
 
 export function formatAuditTerminal(report: AuditReport, top = 10): string {

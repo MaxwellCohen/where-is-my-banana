@@ -6,6 +6,7 @@ import { loadDataTables } from "../data/index.js";
 import { loadReplacements } from "../external/module-replacements.js";
 import { analyzeImportUsage, moduleFacts, type ImportUsage } from "./usage-analyze.js";
 import type {
+  Confidence,
   EdgeCut,
   FixKind,
   RouteAttribution,
@@ -40,9 +41,17 @@ export function detectFramework(projectRoot: string): Framework {
 
 const DROP_BELOW_BYTES = 10 * 1024;
 
+/** Conservative gz cost of next/dynamic (loadable + lazy wrapper) when the route doesn't already ship it. */
+export const DYNAMIC_RUNTIME_BYTES = 1536;
+/** Predicted savings below this are not worth the extra request / layout risk. */
+export const MIN_PREDICTED_SAVING_BYTES = 2048;
+
 interface Group {
   cut: EdgeCut;
   routes: Record<string, number>;
+  /** every route in the group already ships dynamic-import runtime */
+  dynamicRuntime: boolean;
+  alsoReachableVia?: string[][];
 }
 
 /**
@@ -60,12 +69,14 @@ function mergeEdges(attributions: RouteAttribution[]): Group[] {
       const key = `${cut.edge.importer}\0${cut.edge.imported}`;
       let g = groups.get(key);
       if (!g) {
-        g = { cut, routes: {} };
+        g = { cut, routes: {}, dynamicRuntime: true };
         groups.set(key, g);
       } else if (cut.chain.length < g.cut.chain.length) {
         g.cut = { ...cut, loc: cut.loc ?? g.cut.loc };
       }
       g.routes[attr.route] = Math.max(g.routes[attr.route] ?? 0, cut.uniqueBytes);
+      if (!attr.hasDynamicRuntime) g.dynamicRuntime = false;
+      if (cut.alsoReachableVia && !g.alsoReachableVia) g.alsoReachableVia = cut.alsoReachableVia;
     }
   }
   return dedupeChains([...groups.values()]);
@@ -216,7 +227,7 @@ export async function classifyWins(
 
     const determined = fixKind !== null;
     if (!fixKind) {
-      if (usage === "unknown" && total < DROP_BELOW_BYTES) continue;
+      if (usage === "unknown" && total < DROP_BELOW_BYTES && !g.alsoReachableVia) continue;
       fixKind = "lazy";
     }
 
@@ -236,6 +247,16 @@ export async function classifyWins(
     );
     if (others.length > 0) reasons.add("shared-with-eager-route");
 
+    // Predicted saving: measured saving minus the lazy-loading runtime (component form only; handler import() is ~free).
+    let predicted = total;
+    if (fixKind === "lazy" && usage !== "event-handler-only" && !g.dynamicRuntime) predicted = Math.max(0, total - DYNAMIC_RUNTIME_BYTES);
+    if (g.alsoReachableVia?.length) reasons.add("static-elsewhere");
+    if (fixKind === "lazy" && predicted < MIN_PREDICTED_SAVING_BYTES) reasons.add("net-negative-risk");
+    let confidence: Confidence = "high";
+    if (g.alsoReachableVia?.length || usage === "unknown" || usage === "always-rendered") confidence = "low";
+    else if (fixKind === "lazy" && (usage === "conditional-render" || predicted < MIN_PREDICTED_SAVING_BYTES * 2)) confidence = "medium";
+    if (g.alsoReachableVia?.length && total === 0) predicted = 0;
+
     const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement);
     wins.push({
       id: `${fixKind}:${edge.importer}:${edge.imported}`,
@@ -251,16 +272,23 @@ export async function classifyWins(
       byteSource: ctx.byteSource,
       chain: g.cut.chain,
       edit,
+      ...(g.alsoReachableVia ? { alsoReachableVia: g.alsoReachableVia } : {}),
+      predictedSavedBytes: predicted,
+      confidence,
     });
   }
 
-  wins.sort(
+  sortWins(wins);
+  return wins;
+}
+
+export function sortWins(wins: Win[]): Win[] {
+  return wins.sort(
     (a, b) =>
-      b.totalSavedBytes - a.totalSavedBytes ||
+      (b.predictedSavedBytes ?? b.totalSavedBytes) - (a.predictedSavedBytes ?? a.totalSavedBytes) ||
       (a.safety === b.safety ? 0 : a.safety === "safe" ? -1 : 1) ||
       a.id.localeCompare(b.id),
   );
-  return wins;
 }
 
 function buildEdit(
@@ -279,6 +307,8 @@ function buildEdit(
   const names = u?.bindings.map((b) => b.local).join(", ") ?? "";
 
   switch (fixKind) {
+    case "stub-alias": // built by detectStubWins; never reached through classifyWins
+      return { summary: `Stub ${target} on the client`, steps: [], verify };
     case "remove":
       return {
         summary: `Remove unused import of ${target} from ${file}`,

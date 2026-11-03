@@ -109,6 +109,9 @@ export interface RawWin {
   safety?: string;
   edge?: { importer?: string; imported?: string; packageName?: string | null };
   totalSavedBytes?: number;
+  predictedSavedBytes?: number;
+  safetyReasons?: string[];
+  alsoReachableVia?: string[][];
   byteSource?: string;
   routes?: Record<string, number>;
   edit?: { summary?: string; replacementImport?: string; originalImport?: string; steps?: string[]; verify?: string };

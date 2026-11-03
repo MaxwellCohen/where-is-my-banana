@@ -19,6 +19,7 @@ export const CHECKS = [
   "css-weight",
   "use-client-inventory",
   "ssr-false-misuse",
+  "split-candidate",
 ] as const;
 export type CheckName = (typeof CHECKS)[number];
 
@@ -37,6 +38,49 @@ export interface Finding {
   impactScore?: number;
   /** Rough work to fix: S (minutes), M (an hour), L (a day+). */
   effort?: Effort;
+  /** Structured facts behind the finding (split-candidate only). */
+  evidence?: SplitEvidence;
+}
+
+export interface SplitCluster {
+  name: string;
+  declarations: string[];
+  loc: number;
+  imports: string[];
+  /** Heavy packages only this cluster uses. */
+  heavy: string[];
+  interactive: boolean;
+}
+
+export interface SplitEvidence {
+  loc: number;
+  declarations: number;
+  exports: number;
+  imports: number;
+  packages: number;
+  client: boolean;
+  clientReachable: boolean;
+  hooks: number;
+  jsxNodes: number;
+  /** LOC share of the largest cluster, 1 = fully cohesive. */
+  cohesion: number;
+  clusters: SplitCluster[];
+  uniqueHeavy: string[];
+  triggers: string[];
+  /** Measured gzip-agnostic KB of the unique heavy packages (from .wimb/bundle-graph.json), when available. */
+  measuredKB?: number;
+  serverEligibleLoc?: number;
+}
+
+export interface SplitThresholds {
+  splitMinLoc: number;
+  splitMinClusterLoc: number;
+  splitGodFileLoc: number;
+  splitGodFileDecls: number;
+  splitGodFileImports: number;
+  splitServerEligibleLoc: number;
+  splitRegistryMinImports: number;
+  splitHeavyKb: number;
 }
 
 export type Effort = "S" | "M" | "L";
@@ -56,6 +100,10 @@ export interface PackageInfo {
 export interface AuditContext {
   files: SourceFile[];
   packages: PackageInfo[];
+  /** split-candidate threshold overrides. */
+  split?: Partial<SplitThresholds>;
+  /** Measured bytes per npm package (from .wimb/bundle-graph.json). */
+  measured?: Record<string, number>;
 }
 
 export type Check = (ctx: AuditContext) => Finding[];

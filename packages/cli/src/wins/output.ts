@@ -3,6 +3,9 @@ import { join } from "node:path";
 import type { Win, WinsReport } from "./types.js";
 
 const kb = (n: number) => (n / 1024).toFixed(1);
+/** What to expect after the fix (older reports have only totalSavedBytes). */
+const expected = (w: Win) => w.predictedSavedBytes ?? w.totalSavedBytes;
+const viaText = (chains: string[][]) => chains.map((c) => c.map((p) => shortPath(p, 40)).join(" -> ")).join("; ");
 
 function locOf(w: Win): string {
   return `${w.edge.importer}${w.loc ? `:${w.loc.line}` : ""}`;
@@ -66,10 +69,10 @@ export function formatWinsTerminal(report: WinsReport, opts: { top?: number } = 
   wins.forEach((w, i) => {
     const top = Object.entries(w.routes).sort((a, b) => b[1] - a[1])[0];
     const total = top ? firstLoad.get(top[0]) : undefined;
-    const pct = top && total ? `${((top[1] / total) * 100).toFixed(1)}%` : "-";
+    const pct = top && total ? `${((Math.min(top[1], expected(w)) / total) * 100).toFixed(1)}%` : "-";
     rows.push([
       String(i + 1),
-      kb(w.totalSavedBytes),
+      kb(expected(w)),
       pct,
       w.fixKind,
       w.safety,
@@ -79,6 +82,11 @@ export function formatWinsTerminal(report: WinsReport, opts: { top?: number } = 
     ]);
   });
   lines.push(...table(rows, 4, !!process.stdout.isTTY));
+  wins.forEach((w, i) => {
+    if (w.alsoReachableVia?.length) lines.push(`  #${i + 1} also statically reachable via ${viaText(w.alsoReachableVia)}`);
+    if (w.predictedSavedBytes !== undefined && w.predictedSavedBytes < w.totalSavedBytes)
+      lines.push(`  #${i + 1} measured ${kb(w.totalSavedBytes)} KB, predicted ${kb(w.predictedSavedBytes)} KB after lazy-loading runtime`);
+  });
   if (report.wins.length > top) lines.push(`... ${report.wins.length - top} more (see .wimb/wins.md)`);
   return lines.join("\n");
 }
@@ -97,14 +105,20 @@ export function formatWinsMarkdown(report: WinsReport): string {
   out.push("| # | KB saved | Fix | Safety | Pkg | Location | Routes |", "| ---: | ---: | --- | --- | --- | --- | ---: |");
   report.wins.forEach((w, i) => {
     out.push(
-      `| ${i + 1} | ${kb(w.totalSavedBytes)} | ${w.fixKind} | ${w.safety} | ${w.edge.packageName ?? "app"} | \`${shortLoc(w)}\` | ${Object.keys(w.routes).length} |`,
+      `| ${i + 1} | ${kb(expected(w))} | ${w.fixKind} | ${w.safety} | ${w.edge.packageName ?? "app"} | \`${shortLoc(w)}\` | ${Object.keys(w.routes).length} |`,
     );
   });
   out.push("", "## Details", "");
   report.wins.forEach((w, i) => {
-    out.push(`### ${i + 1}. ${w.edge.imported} (${kb(w.totalSavedBytes)} KB, ${w.fixKind}, ${w.safety})`, "");
+    out.push(`### ${i + 1}. ${w.edge.imported} (${kb(expected(w))} KB, ${w.fixKind}, ${w.safety})`, "");
     out.push(`- Location: \`${locOf(w)}\``);
     if (w.safetyReasons.length) out.push(`- Reasons: ${w.safetyReasons.join(", ")}`);
+    if (w.predictedSavedBytes !== undefined)
+      out.push(`- Measured ${kb(w.totalSavedBytes)} KB, predicted ${kb(w.predictedSavedBytes)} KB${w.confidence ? ` (confidence: ${w.confidence})` : ""}`);
+    if (w.alsoReachableVia?.length) {
+      out.push("- Also statically reachable via (cutting this edge alone will not remove it):");
+      for (const c of w.alsoReachableVia) out.push(`  - ${c.join(" -> ")}`);
+    }
     out.push(`- Usage: ${w.usage}`);
     out.push(
       `- Routes: ${Object.entries(w.routes)
@@ -113,7 +127,14 @@ export function formatWinsMarkdown(report: WinsReport): string {
     );
     out.push(`- Chain: ${w.chain.join(" -> ")}`, "");
     out.push(w.edit.summary, "");
-    if (w.edit.originalImport) out.push("```ts", `- ${w.edit.originalImport}`, ...(w.edit.replacementImport ? [`+ ${w.edit.replacementImport}`] : []), "```", "");
+    if (w.stub) {
+      out.push("Turbopack:", "```js", w.stub.turbopackConfig, "```", "", "Webpack:", "```js", w.stub.webpackConfig, "```", "");
+      out.push(`Stub file \`${w.stub.stubPath}\`:`, "```js", w.stub.stubContent.trimEnd(), "```", "");
+      out.push(`Signals: ${w.stub.signals.join(", ")}; pulled in via ${w.stub.via.join(", ")} (sideEffects: false).`, "");
+    }
+    if (w.stub) {
+      // config shown above
+    } else if (w.edit.originalImport) out.push("```ts", `- ${w.edit.originalImport}`, ...(w.edit.replacementImport ? [`+ ${w.edit.replacementImport}`] : []), "```", "");
     else if (w.edit.replacementImport) out.push("```ts", w.edit.replacementImport, "```", "");
     if (w.edit.steps.length) out.push(...w.edit.steps.map((s, n) => `${n + 1}. ${s}`), "");
     out.push(`Verify: \`${w.edit.verify}\``, "");

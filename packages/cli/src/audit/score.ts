@@ -16,10 +16,14 @@ const DAMPEN: Record<string, number> = {
   "use-client-inventory": -10,
   "old-browserslist/missing": -5,
   "heavy-deps/cms-sdk": -5,
+  "split-candidate/god-file": -5,
 };
 
-export function impactOf(f: Pick<Finding, "id" | "check" | "severity" | "file">): number {
+export function impactOf(f: Pick<Finding, "id" | "check" | "severity" | "file"> & { evidence?: Finding["evidence"] }): number {
   let n = BASE[f.severity] + (BOOST[f.check] ?? 0) + (DAMPEN[f.id] ?? DAMPEN[f.check] ?? 0);
+  const kb = f.evidence?.measuredKB ?? 0;
+  if (kb >= 100) n += 10;
+  else if (kb >= 30) n += 5;
   if (isLayoutLike(f.file)) n += 10;
   return Math.max(0, Math.min(100, n));
 }
@@ -47,6 +51,8 @@ export function effortOf(f: Pick<Finding, "id" | "check">): Effort {
       return /axios|core-js|regenerator|node-fetch|cross-fetch/.test(f.id) ? "S" : "M";
     case "use-client-inventory":
       return "L";
+    case "split-candidate":
+      return f.id === "split-candidate/god-file" ? "L" : "M";
     default:
       return "M";
   }

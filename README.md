@@ -74,7 +74,9 @@ Bump `packages/cli/package.json` version on `main`, then push a matching tag (`g
 
 - **First-load JS per route**: compressed client bytes a visitor downloads for that route.
 - **uniqueBytes**: bytes that leave a route if exactly one import edge is cut (what is reachable only through it).
-- **Win**: an edge cut with a fix kind (`lazy`, `move-to-server`, `swap-package`, `deep-import`, `remove`) and a safety rating (`safe` or `needs-review` with reasons such as `above-the-fold`, `needs-ssr`).
+- **Win**: an edge cut with a fix kind (`lazy`, `move-to-server`, `swap-package`, `deep-import`, `remove`, `stub-alias`) and a safety rating (`safe` or `needs-review` with reasons such as `above-the-fold`, `needs-ssr`).
+- `predictedSavedBytes` = measured saving minus the lazy-loading runtime (about 1.5 KB for `next/dynamic` when the route doesn't already ship it); `confidence` is `high|medium|low`. `alsoReachableVia` lists other static import chains that keep the module in the route (reason `static-elsewhere`); wins predicted at under 2 KB are `net-negative-risk`. Both are demoted to `needs-review` and excluded from `--fail-on-safe-wins`. Always verify with `--compare`.
+- `stub-alias` (reason `client-stub`): a node-only-looking package reached only through barrel re-exports of a `"sideEffects": false` package. The win carries a browser-only `turbopack.resolveAlias` / webpack client alias plus stub file content. Heuristic (regex over re-exports, not a full parse); check the client never calls it.
 - `totalSavedBytes` sums a win across routes; `byteSource` says `measured` or `estimated`.
 
 ## Agent loop
@@ -92,6 +94,14 @@ npx @maxwellcohen/wimb wins --cwd . \
 
 - `--budget-route <bytes>`: fail if any route's first-load JS exceeds the budget.
 - `--fail-on-safe-wins <bytes>`: fail if unclaimed safe wins total more than this.
+
+## Why is X in my bundle?
+
+```bash
+npx @maxwellcohen/wimb why moment --cwd .          # package, path fragment or glob (@scope/*)
+```
+
+Prints the shortest import chain from the route entry, subtree/unique bytes, and up to `--chains N` (default 3) alternative chains with distinct first hops, each with the edge to cut and whether other chains keep it alive. Flags: `--route <substr>`, `--all-routes`, `--json`, plus the `wins` data flags (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`). Exits 1 if it is not in the client graph (says so when it is server-only).
 
 ## Other commands
 
@@ -113,7 +123,9 @@ Baseline: `--save-baseline [--baseline file]` records current findings (default 
 
 Scoring: each finding has `impactScore` (0-100 estimate, not measured: severity base 75/45/15, +5 to +10 for sitewide or LCP checks, +10 in layouts, -5 to -10 for info-like rules) and `effort` S (minutes), M (about an hour), L (a day or more). "Do these first" ranks by impact divided by effort weight (S=1, M=2, L=4), at most 2 per check on the first pass.
 
-Checks: `third-party-script`, `raw-img`, `lcp-priority`, `image-config`, `cms-image-params`, `fonts`, `force-dynamic`, `missing-static-params`, `sequential-await`, `full-cms-payload-to-client`, `heavy-deps`, `old-browserslist`, `maps-widgets`, `middleware-scope`, `preview-code-in-prod`, `css-weight`, `use-client-inventory`, `ssr-false-misuse`. Checks are regex heuristics, not AST analysis; expect some false positives.
+Checks: `third-party-script`, `raw-img`, `lcp-priority`, `image-config`, `cms-image-params`, `fonts`, `force-dynamic`, `missing-static-params`, `sequential-await`, `full-cms-payload-to-client`, `heavy-deps`, `old-browserslist`, `maps-widgets`, `middleware-scope`, `preview-code-in-prod`, `css-weight`, `use-client-inventory`, `ssr-false-misuse`, `split-candidate`. Most checks are regex heuristics; expect some false positives. `split-candidate` parses with oxc.
+
+`split-candidate` ("files worth breaking up") clusters each file's top-level declarations by shared local helpers/state (a stateless top-level component that only composes the pieces is treated as the shell, not glue; shared imports do not link clusters since each new file can import them itself). It flags files with 2+ independent clusters that are large (`splitMinLoc`) or where one cluster alone pulls a heavy package (chart/map/editor/markdown/date/pdf libs, the `heavy-deps` list, or any package measured at `splitHeavyKb`+ in `.wimb/bundle-graph.json`, which also gives the "~N KB" and weights the score). Ids: `heavy-cluster` (high when client-reachable), `low-cohesion` (medium client / low server), `god-file` (low; long but coupled), `server-eligible` (a `"use client"` file whose static part uses no hooks/handlers/browser APIs), `registry` (many components imported only to sit in a lookup map). Each `fix` is a concrete split plan (new file names, what moves, where `"use client"` goes, which module to `next/dynamic` with SSR on and a sized placeholder, importers to update, no barrel). `audit.md` ends with a "Files worth breaking up" table. Optional `wimb.config` thresholds (numeric literals): `splitMinLoc` 250, `splitMinClusterLoc` 25, `splitGodFileLoc` 600, `splitGodFileDecls` 12, `splitGodFileImports` 25, `splitServerEligibleLoc` 80, `splitRegistryMinImports` 8, `splitHeavyKb` 30. To suppress one file put `// wimb-ignore-next-line split-candidate` above its first non-import statement.
 
 ## One command: `wimb speed`
 

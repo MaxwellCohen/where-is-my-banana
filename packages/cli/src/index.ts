@@ -15,7 +15,8 @@ import { runLive, writeLive, formatTerminal } from "./live/index.js";
 import { DEFAULT_UA, MOBILE_UA } from "./live/net.js";
 import { loadConfig } from "./config.js";
 import { DEFAULT_VISUALIZER_URL, buildPayload, inlineUrl, launchBrowser, serveOnce } from "./open.js";
-import { runWins, runNextAnalyze } from "./wins/index.js";
+import { runWins, runNextAnalyze, loadGraph } from "./wins/index.js";
+import { formatWhy, whyReport } from "./why/index.js";
 import { isViteProject } from "./sources/vite.js";
 import { formatWinsTerminal, writeWins } from "./wins/output.js";
 import { checkBudget, compareWins } from "./wins/compare.js";
@@ -164,6 +165,47 @@ const vizCommand = defineCommand({
   subCommands: { build: vizBuildCommand },
 });
 
+const whyCommand = defineCommand({
+  meta: { name: "why", description: "Explain why a package or file is in the client first-load bundle (import chains)" },
+  args: {
+    target: { type: "positional", description: "Package name, path fragment or glob (e.g. moment, @scope/pkg, components/Chart.tsx, @scope/*)", required: true },
+    cwd: { type: "string", description: "Project root", default: process.cwd() },
+    "analyze-export": { type: "string", description: "next analyze export JSONL (.jsonl or .jsonl.gz)" },
+    "dist-dir": { type: "string", description: "distDir with diagnostics/analyze (default .next)" },
+    snapshot: { type: "string", description: "Named next analyze snapshot" },
+    analyze: { type: "boolean", description: "Run `next analyze --output` first (use --no-analyze to reuse existing data)", default: true },
+    vite: { type: "boolean", description: "Analyze a Vite app via an in-process build (auto-detected)" },
+    route: { type: "string", description: "Only routes containing this substring" },
+    "all-routes": { type: "boolean", description: "List every route that includes the target", default: false },
+    chains: { type: "string", description: "Max distinct import chains per route", default: "3" },
+    json: { type: "boolean", description: "Print the report as JSON", default: false },
+  },
+  async run({ args }) {
+    const projectRoot = resolve(args.cwd);
+    let report;
+    try {
+      const chains = parseNumberFlag("chains", args.chains) ?? 3;
+      const snapshot = args.snapshot ?? (args.analyze ? "wins" : undefined);
+      const vite = args.vite ?? isViteProject(projectRoot);
+      if (!vite && args.analyze && !args["analyze-export"]) await runNextAnalyze(projectRoot, snapshot!);
+      const graph = await loadGraph({
+        projectRoot,
+        analyzeExportPath: args["analyze-export"] ? resolve(projectRoot, args["analyze-export"]) : undefined,
+        distDir: args["dist-dir"],
+        snapshot,
+        vite,
+        analyzed: args.analyze,
+      });
+      report = whyReport(graph, args.target, { route: args.route, allRoutes: args["all-routes"], chains });
+    } catch (err) {
+      return fail(err);
+    }
+    console.log(args.json ? JSON.stringify(report, null, 2) : formatWhy(report));
+    const exitCode = report.routes.length ? 0 : 1;
+    process.stdout.write("", () => process.exit(exitCode));
+  },
+});
+
 const winsCommand = defineCommand({
   meta: { name: "wins", description: "Rank import edges whose removal shrinks first-load client JS" },
   args: {
@@ -276,7 +318,7 @@ const auditCommand = defineCommand({
     }
     const config = await loadConfig(projectRoot);
     const log = args.json ? console.error : console.log;
-    const base = { projectRoot, checks, ignoreFiles: config.ignores.files, ignoreRules: config.ignores.rules };
+    const base = { projectRoot, checks, ignoreFiles: config.ignores.files, ignoreRules: config.ignores.rules, thresholds: config.thresholds };
     const baselinePath = args.baseline ? resolve(projectRoot, args.baseline) : undefined;
     if (args["save-baseline"]) {
       const target = baselinePath ?? resolve(projectRoot, ".wimb", "audit-baseline.json");
@@ -449,7 +491,7 @@ const liveCommand = defineCommand({
 
 const main = defineCommand({
   meta: { name: "wimb", description: "Where Is My Banana — Next.js client bloat detector" },
-  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand },
+  subCommands: { scan: scanCommand, viz: vizCommand, wins: winsCommand, why: whyCommand, audit: auditCommand, speed: speedCommand, open: openCommand, live: liveCommand },
 });
 
 runMain(main);

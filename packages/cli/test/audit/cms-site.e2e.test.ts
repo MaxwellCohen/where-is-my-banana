@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runAudit, collectFindings } from "../../src/audit/index.js";
 import { applyFixes } from "../../src/audit/fix.js";
+import { formatAuditMarkdown } from "../../src/audit/output.js";
 
 const FIXTURE = resolve(__dirname, "../fixtures/cms-site");
 const report = runAudit({ projectRoot: FIXTURE });
@@ -40,6 +41,7 @@ describe("cms-site fixture (bad area)", () => {
     ["middleware-scope", "middleware.ts"],
     ["preview-code-in-prod", "app/layout.tsx"],
     ["ssr-false-misuse", "components/blocks/registry.tsx"],
+    ["split-candidate/heavy-cluster", "components/blocks/LocationsDashboard.tsx"],
   ];
   it.each(expected)("%s in %s", (id, file) => {
     expect(has(id, file), `${id} @ ${file}`).toBe(true);
@@ -47,7 +49,20 @@ describe("cms-site fixture (bad area)", () => {
   it("covers every check", () => {
     const checks = new Set(report.findings.map((f) => f.check));
     // use-client-inventory is info-only and needs >=10 client files per bucket
-    expect([...checks].length).toBeGreaterThanOrEqual(17);
+    expect([...checks].length).toBeGreaterThanOrEqual(18);
+  });
+  it("explains how to split the god component", () => {
+    const f = report.findings.find((x) => x.id === "split-candidate/heavy-cluster" && x.file === "components/blocks/LocationsDashboard.tsx")!;
+    expect(f.severity).toBe("high");
+    expect(f.evidence!.clusters.map((c) => c.name).sort()).toEqual(["CallbackForm", "LocationsTable", "RevenueChart"]);
+    expect(f.evidence!.uniqueHeavy).toEqual(["recharts"]);
+    expect(f.fix).toContain("RevenueChart.tsx");
+    expect(f.fix).toContain("next/dynamic");
+    expect(f.fix).toContain("thin composer");
+    expect(f.fix).not.toContain("ssr: false");
+  });
+  it("lists it under Files worth breaking up", () => {
+    expect(formatAuditMarkdown(report)).toMatch(/## Files worth breaking up[\s\S]*LocationsDashboard\.tsx[\s\S]*recharts/);
   });
   it("skips stories, tests and .d.ts", () => {
     expect(report.findings.filter((f) => /\.stories\.|\.test\.|\.d\.ts$/.test(f.file))).toEqual([]);

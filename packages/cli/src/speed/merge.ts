@@ -190,7 +190,7 @@ function themeFromText(t: string): Theme {
 function winItems(wins: RawWin[]): PlanItem[] {
   const out: PlanItem[] = [];
   for (const w of wins) {
-    const bytes = w.totalSavedBytes ?? 0;
+    const bytes = w.predictedSavedBytes ?? w.totalSavedBytes ?? 0;
     if (!w.edge || bytes <= 0) continue;
     const kb = bytes / 1024;
     const importer = w.edge.importer ?? "?";
@@ -199,10 +199,12 @@ function winItems(wins: RawWin[]): PlanItem[] {
     const kind = w.fixKind ?? "lazy";
     const theme: Theme = /block|registry|cms/i.test(`${importer} ${imported}`)
       ? "CMS blocks/registry"
-      : isPkg || kind === "swap-package" ? "Dependencies" : "JS bundle";
+      : kind === "stub-alias" ? "JS bundle" : isPkg || kind === "swap-package" ? "Dependencies" : "JS bundle";
     const score = clamp(15 + kb * 1.5);
     const edit = w.edit ?? {};
     const steps = [...(edit.steps ?? [])];
+    const elsewhere = w.alsoReachableVia?.[0];
+    if (elsewhere) steps.unshift(`Also statically reachable via ${elsewhere.join(" -> ")}: cutting this edge alone may save nothing. Verify with --compare and revert if bytes do not drop.`);
     if (edit.originalImport && edit.replacementImport) steps.unshift(`Replace \`${edit.originalImport}\` with \`${edit.replacementImport}\``);
     if (!steps.length) steps.push(edit.summary ?? `${kind} ${imported} from ${importer}`);
     const routes = Object.keys(w.routes ?? {});

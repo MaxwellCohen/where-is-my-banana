@@ -56,6 +56,9 @@ Edge cases:
 | `no-default-export` | Module has no default export | Same mapping as above. |
 | `already-in-suspense` | Already under a Suspense boundary | Likely already deferred; confirm the import is actually still sync in the graph before changing. |
 | `shared-with-eager-route` | Another route imports it eagerly | Saving is partial. Check `routes` and whether those routes can change too; expect a smaller delta. |
+| `static-elsewhere` | `alsoReachableVia` shows another static chain that keeps the module | Cutting this edge alone saves little or nothing. Cut or lazy-load those chains too, or skip. |
+| `net-negative-risk` | `predictedSavedBytes` is under ~2 KB after the `next/dynamic` runtime | Skip unless the route already ships `next/dynamic`. |
+| `client-stub` | `stub-alias`: stub a server-only package out of the client bundle | Create the stub, add the browser-only alias (Turbopack `resolveAlias` / webpack `!isServer`), and confirm no client code calls the package; test the server path still works. |
 | `unresolved-usage` | No JSX or handler usage found | Open the file and find real usages (re-exports, props, refs) by hand. If unclear, skip. |
 
 ## 4. Verify
@@ -69,6 +72,8 @@ pnpm exec tsc --noEmit && pnpm test
 Confirm the targeted win is gone (or smaller) and the byte delta is positive and close to `totalSavedBytes`. Also confirm no other route's `firstLoadBytes` grew and typecheck and tests pass. Run `win.edit.verify` if present.
 
 If the delta is not realized, or anything regressed: `git checkout -- <files>` and move to the next win. Then `cp .wimb/wins.json .wimb/wins.prev.json` before the next iteration.
+
+After any `lazy` win, the saving is only real if bytes dropped: compare `firstLoadBytes` before/after with `--compare` and **revert the change if the route did not shrink** (a chunk can stay in first load via another static chain or an SSR-rendered `dynamic`). Use `pnpm exec wimb why <pkg>` to see every import chain keeping a package in the bundle. Rank by `predictedSavedBytes` (falls back to `totalSavedBytes`) and read `confidence`.
 
 ## 5. Stop when
 

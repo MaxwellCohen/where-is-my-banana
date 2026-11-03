@@ -55,7 +55,7 @@ export function checkBudget(report: WinsReport, opts: BudgetOptions): BudgetViol
     }
   }
   if (opts.maxSafeWinBytes != null) {
-    const safe = report.wins.filter((w) => w.safety === "safe").reduce((s, w) => s + w.totalSavedBytes, 0);
+    const safe = report.wins.filter((w) => w.safety === "safe").reduce((s, w) => s + (w.predictedSavedBytes ?? w.totalSavedBytes), 0);
     if (safe > opts.maxSafeWinBytes) {
       out.push({
         kind: "safe-wins-over-limit",

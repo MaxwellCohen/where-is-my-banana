@@ -8,7 +8,8 @@ import { buildGraphFromBinary } from "./binary-graph.js";
 import { buildGraphFromVite, isViteProject } from "../sources/vite.js";
 import { nextHasAnalyze, runNext } from "./next-cli.js";
 import { attributeRoutes } from "./attribute.js";
-import { classifyWins, detectFramework } from "./classify.js";
+import { classifyWins, detectFramework, sortWins } from "./classify.js";
+import { detectStubWins } from "./stubs.js";
 import type { WinsReport } from "./types.js";
 
 export interface RunWinsOptions {
@@ -41,7 +42,7 @@ export async function runNextAnalyze(projectRoot: string, snapshot: string): Pro
   await runNext(projectRoot, args);
 }
 
-async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
+export async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
   if (opts.analyzeExportPath) {
     if (!existsSync(opts.analyzeExportPath)) {
       throw new Error(`analyze export not found at ${opts.analyzeExportPath}`);
@@ -76,6 +77,8 @@ export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   const attributions = attributeRoutes(graph, { minBytes: opts.minBytes });
   if (attributions.length === 0) throw new Error(NO_ATTRIBUTION_MESSAGE);
   const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured", framework: detectFramework(opts.projectRoot) });
+  wins.push(...detectStubWins(graph, { projectRoot: opts.projectRoot, minBytes: opts.minBytes }));
+  sortWins(wins);
   return {
     version: "2",
     timestamp: new Date().toISOString(),

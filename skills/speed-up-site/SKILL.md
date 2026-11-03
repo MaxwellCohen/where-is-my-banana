@@ -3,7 +3,7 @@ name: speed-up-site
 description: >-
   Make a Next.js / CMS-driven website faster end to end with WIMB. Runs the
   static `wimb audit` (third-party scripts, images, fonts, rendering/caching,
-  heavy deps, client boundaries) plus `wimb wins` (bundle edges), fixes the
+  heavy deps, client boundaries, oversized low-cohesion files to split) plus `wimb wins` (bundle edges), fixes the
   highest-impact safe items, and proves each with a before/after measurement.
   Use when asked to speed up, optimize, or improve performance of a site.
 ---
@@ -22,9 +22,12 @@ Runs the static audit, `wins`, and (with `--url`/`--urls-file`/`--sitemap`) the 
 1. Work "Do first (code, safe)" top to bottom; each item has files, exact steps, and a verify command.
 2. Do not act on "Needs a human decision" or "Not code (GTM/CDN/CMS)": summarize them for the user (the latter include exact steps for the person who owns the tool).
 3. For bundle items follow `skills/reduce-client-js/SKILL.md`; for registry/CMS block items also run `wimb scan`.
+4. `split-candidate` items (files worth breaking up) carry a step-by-step split plan in `fix`: create the named files, move the listed declarations/imports, put `"use client"` only where stated, load the heavy module with `next/dynamic` (SSR on, sized placeholder, never `ssr: false`), update importers directly (no barrels), then re-run `wimb wins`.
 
 ## 3. Per fix
 Edit, run the repo's build, then `npx --yes @maxwellcohen/wimb speed --compare` and confirm the item moved to "resolved". Keep the change only if the build passes and the item resolved (or bytes dropped). Revert otherwise. One commit per fix with the measured delta.
+
+For bundle items: after applying a `lazy` win the agent must verify bytes dropped (`--compare`) and revert if not. `wimb why <pkg>` explains what keeps a package in the client bundle; `stub-alias` items (node-only SDK pulled in by a `sideEffects: false` barrel) are `needs-review`: apply only after confirming the client never calls the package.
 
 ## 4. Do not guess
 - Heuristic checks (`sequential-await`, `full-cms-payload-to-client`, `maps-widgets`, `middleware-scope`) can be false positives: read the code before editing.

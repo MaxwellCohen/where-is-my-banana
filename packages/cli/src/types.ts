@@ -112,6 +112,15 @@ export interface WimbConfig {
     searchIndexMinBytes: number;
     base64MinBytes: number;
     rscPayloadMaxFields: number;
+    // wimb audit split-candidate (all optional)
+    splitMinLoc?: number;
+    splitMinClusterLoc?: number;
+    splitGodFileLoc?: number;
+    splitGodFileDecls?: number;
+    splitGodFileImports?: number;
+    splitServerEligibleLoc?: number;
+    splitRegistryMinImports?: number;
+    splitHeavyKb?: number;
   };
   ignores: {
     files: string[];

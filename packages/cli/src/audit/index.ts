@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type { AuditContext, AuditReport, Check, CheckName, Finding, SourceFile } from "./types.js";
+import type { AuditContext, AuditReport, Check, CheckName, Finding, SourceFile, SplitThresholds } from "./types.js";
 import { CHECKS } from "./types.js";
 import { cmsImageParams, imageConfig, lcpPriority, rawImg } from "./images.js";
 import { cssWeight, fonts } from "./fonts-css.js";
@@ -8,6 +8,7 @@ import { mapsWidgets, previewCodeInProd, thirdPartyScript } from "./scripts.js";
 import { forceDynamic, fullCmsPayloadToClient, middlewareScope, missingStaticParams, sequentialAwait } from "./rendering.js";
 import { heavyDeps, oldBrowserslist } from "./deps.js";
 import { ssrFalseMisuse, useClientInventory } from "./client.js";
+import { splitCandidate } from "./split.js";
 import { buildReport } from "./output.js";
 import { makeIgnoreMatcher } from "./glob.js";
 import { withScore } from "./score.js";
@@ -36,6 +37,7 @@ export const CHECK_FNS: Record<CheckName, Check> = {
   "css-weight": cssWeight,
   "use-client-inventory": useClientInventory,
   "ssr-false-misuse": ssrFalseMisuse,
+  "split-candidate": splitCandidate,
 };
 
 const SKIP_DIRS = new Set(["node_modules", ".next", "dist", ".wimb", ".git", ".turbo", ".vercel", ".cache", ".output", "coverage", "storybook-static"]);
@@ -71,7 +73,7 @@ export function walkProject(root: string): SourceFile[] {
   return out;
 }
 
-export function buildContext(files: SourceFile[]): AuditContext {
+export function buildContext(files: SourceFile[], extra: Pick<AuditContext, "split" | "measured"> = {}): AuditContext {
   const packages: AuditContext["packages"] = [];
   for (const f of files) {
     if (!/(?:^|\/)package\.json$/.test(f.path)) continue;
@@ -81,7 +83,7 @@ export function buildContext(files: SourceFile[]): AuditContext {
       /* invalid package.json */
     }
   }
-  return { files, packages };
+  return { files, packages, ...extra };
 }
 
 /** Pure: run checks over an in-memory context. */
@@ -115,12 +117,15 @@ export interface AuditOptions {
   ignoreFiles?: string[];
   ignoreRules?: string[];
   baseline?: Baseline;
+  /** split-candidate threshold overrides (wimb.config thresholds). Read from wimb.config.* when omitted. */
+  thresholds?: Partial<SplitThresholds>;
 }
 
 /** Findings after config ignores, before any baseline. Monorepos audit each Next app package separately. */
 export function collectFindings(opts: AuditOptions): { findings: Finding[]; packages?: string[] } {
   const files = walkProject(opts.projectRoot);
-  const ctx = buildContext(files);
+  const split = opts.thresholds ?? readSplitThresholds(opts.projectRoot);
+  const ctx = buildContext(files, { split, measured: readMeasured(opts.projectRoot) });
   const checks = opts.checks ?? CHECKS;
   const apps = detectNextApps(opts.projectRoot, ctx.packages);
   let findings: Finding[] = [];
@@ -129,7 +134,7 @@ export function collectFindings(opts: AuditOptions): { findings: Finding[]; pack
     packages = apps.map((a) => a.name);
     for (const app of apps) {
       const appFiles = filesOfApp(files, app, apps);
-      for (const f of auditContext(buildContext(appFiles), checks)) findings.push({ ...f, package: app.name });
+      for (const f of auditContext(buildContext(appFiles, { split, measured: { ...ctx.measured, ...readMeasured(join(opts.projectRoot, app.dir)) } }), checks)) findings.push({ ...f, package: app.name });
     }
   } else {
     findings = auditContext(ctx, checks);
@@ -138,6 +143,52 @@ export function collectFindings(opts: AuditOptions): { findings: Finding[]; pack
   const ignored = makeIgnoreMatcher(opts.ignoreFiles ?? []);
   findings = findings.filter((f) => !rules.has(f.check) && !rules.has(f.id) && !ignored(f.file));
   return { findings, packages };
+}
+
+const SPLIT_KEYS = ["splitMinLoc", "splitMinClusterLoc", "splitGodFileLoc", "splitGodFileDecls", "splitGodFileImports", "splitServerEligibleLoc", "splitRegistryMinImports", "splitHeavyKb"] as const;
+
+/** wimb.config.ts is not loadable synchronously, so pick the optional numeric split keys out of its source. */
+function readSplitThresholds(root: string): Partial<SplitThresholds> {
+  const out: Partial<SplitThresholds> = {};
+  for (const name of ["wimb.config.ts", "wimb.config.js", "wimb.config.mjs"]) {
+    let src: string;
+    try {
+      src = readFileSync(join(root, name), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const k of SPLIT_KEYS) {
+      const m = src.match(new RegExp(`\\b${k}\\s*:\\s*([0-9_]+)`));
+      if (m) out[k] = Number(m[1].replace(/_/g, ""));
+    }
+    break;
+  }
+  return out;
+}
+
+/** Bytes per npm package from a measured `.wimb/bundle-graph.json` (largest single-route sum), if present. */
+function readMeasured(root: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  try {
+    const g = JSON.parse(readFileSync(join(root, ".wimb", "bundle-graph.json"), "utf-8"));
+    for (const tree of Object.values<any>(g.trees ?? {})) {
+      const seen = new Set<string>();
+      const sums: Record<string, number> = {};
+      const visit = (n: any) => {
+        if (n.kind === "module" && typeof n.id === "string" && !seen.has(n.id)) {
+          seen.add(n.id);
+          const m = String(n.path ?? n.id).match(/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)\//);
+          if (m) sums[m[1]] = (sums[m[1]] ?? 0) + (n.selfBytes ?? 0);
+        }
+        for (const c of n.children ?? []) visit(c);
+      };
+      visit(tree);
+      for (const [k, v] of Object.entries(sums)) out[k] = Math.max(out[k] ?? 0, v);
+    }
+  } catch {
+    /* no measured data */
+  }
+  return out;
 }
 
 export function runAudit(opts: AuditOptions): AuditReport {

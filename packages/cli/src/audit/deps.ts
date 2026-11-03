@@ -1,14 +1,14 @@
 import type { AuditContext, Finding, Severity } from "./types.js";
 import { find, importsOf, isClient, isCode, lineAt, matches } from "./util.js";
 
-interface Heavy {
+export interface Heavy {
   re: RegExp;
   severity: Severity;
   message: string;
   fix: string;
 }
 
-const HEAVY: Heavy[] = [
+export const HEAVY: Heavy[] = [
   { re: /^moment(?:-timezone)?$/, severity: "high", message: "moment is ~70 KB+ (timezone data adds more) and not tree-shakeable.", fix: "Replace with date-fns (per-function imports), dayjs, or native Intl.DateTimeFormat." },
   { re: /^lodash$/, severity: "medium", message: "`lodash` (CJS) pulls the whole library unless imported per method.", fix: "Switch to `lodash-es` with named imports, or native array/object methods." },
   { re: /^(?:core-js|regenerator-runtime)$/, severity: "medium", message: "Polyfills for browsers Next.js no longer supports.", fix: "Remove the dependency/imports; Next already ships required polyfills. Use modern browserslist targets." },
