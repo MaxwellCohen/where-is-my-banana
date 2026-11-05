@@ -35,7 +35,7 @@ jobs:
         if: steps.check.outputs.publish == 'true'
         run: |
           mkdir dist
-          pnpm --filter @maxwellcohen/wimb pack --pack-destination "$PWD/dist"
+          pnpm --dir packages/cli pack --pack-destination "$PWD/dist"
           cd dist && sha256sum *.tgz > SHA256SUMS
       - if: steps.check.outputs.publish == 'true'
         uses: actions/upload-artifact@v4
