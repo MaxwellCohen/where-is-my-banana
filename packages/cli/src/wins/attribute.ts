@@ -1,10 +1,29 @@
-import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { isAppSourcePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import type { EdgeCut, RouteAttribution } from "./types.js";
+import { buildRouteGraph, chainFrom, lostBytes, parentsWithout } from "./reach.js";
 
 export interface AttributeOptions {
   /** Drop edges whose uniqueBytes is below this (default 2048). */
   minBytes?: number;
+  /** Enables the declared-dependency check against injected entries (reads package.json files). */
+  projectRoot?: string;
+}
+
+const FRAMEWORK_PKGS = new Set(["next", "react", "react-dom", "scheduler"]);
+
+/** Declared (dependencies/optional/peer) package names of the package whose module lives at `moduleRoot`. */
+function declaredDeps(projectRoot: string, moduleRoot: string): string[] {
+  try {
+    const f = join(projectRoot, moduleRoot, "package.json");
+    if (!existsSync(f)) return [];
+    const j = JSON.parse(readFileSync(f, "utf-8")) as Record<string, Record<string, string> | undefined>;
+    return [...Object.keys(j.dependencies ?? {}), ...Object.keys(j.optionalDependencies ?? {}), ...Object.keys(j.peerDependencies ?? {})];
+  } catch {
+    return [];
+  }
 }
 
 const DEFAULT_MIN_BYTES = 2048;
@@ -23,106 +42,28 @@ export function attributeRoutes(graph: ParsedGraph, opts: AttributeOptions = {})
   const minBytes = opts.minBytes ?? DEFAULT_MIN_BYTES;
   const out: RouteAttribution[] = [];
   for (const route of [...graph.routes.keys()].sort()) {
-    out.push(attributeRoute(graph, route, minBytes));
+    out.push(attributeRoute(graph, route, minBytes, opts.projectRoot));
   }
   return out;
 }
 
-function collectSeeds(graph: ParsedGraph, route: string): string[] {
-  const seeds = new Set<string>();
-  const entries = graph.routes.get(route)?.entries;
-  if (entries) {
-    const bootstraps: string[] = [];
-    const refs: string[] = [];
-    const routeEntries: string[] = [];
-    for (const e of entries) {
-      if (e.entry_kind === "client_bootstrap") bootstraps.push(e.module_ident);
-      else if (e.entry_kind !== "server" && e.role === "route") routeEntries.push(e.module_ident);
-      for (const r of e.client_references ?? []) {
-        if (r.reference_kind === "ecmascript") refs.push(r.module_ident);
-      }
-    }
-    const picked = refs.length > 0 || bootstraps.length > 0 ? [...bootstraps, ...refs] : routeEntries;
-    for (const id of picked) if (id) seeds.add(id);
-  }
-  if (seeds.size === 0) {
-    const parts = graph.clientPartsByRoute.get(route);
-    if (parts) {
-      for (const mod of graph.modules.values()) {
-        if (parts.has(normalizeModulePath(mod.path))) seeds.add(mod.ident);
-      }
-    }
-  }
-  return [...seeds];
-}
+const DYNAMIC_RUNTIME_RE = /next\/dist\/(?:esm\/)?(?:shared\/lib\/(?:lazy-dynamic|dynamic|loadable)|client\/components\/dynamic)/;
+/** Exact re-check (edge removed, path-deduped) is done for the top candidates only. */
+const EXACT_CHECK_LIMIT = 200;
+const MAX_ALSO_CHAINS = 3;
 
-function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): RouteAttribution {
-  const parts = graph.clientPartsByRoute.get(route);
-  let firstLoadBytes = 0;
-  if (parts) for (const b of parts.values()) firstLoadBytes += b;
-  const result: RouteAttribution = { route, firstLoadBytes, measured: !!parts, edges: [] };
-  if (!parts) return result;
-
-  // Node 0 = virtual root; others = module idents reachable via sync edges.
-  const idents: string[] = [""];
-  const index = new Map<string, number>();
-  const succ: number[][] = [[]];
-  const intern = (id: string): number => {
-    let i = index.get(id);
-    if (i === undefined) {
-      i = idents.length;
-      index.set(id, i);
-      idents.push(id);
-      succ.push([]);
-    }
-    return i;
+function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, projectRoot?: string): RouteAttribution {
+  const rg = buildRouteGraph(graph, route);
+  if (!rg) return { route, firstLoadBytes: 0, measured: false, edges: [] };
+  const { succ, preds, paths, bytes, parent } = rg;
+  const n = rg.idents.length;
+  const result: RouteAttribution = {
+    route,
+    firstLoadBytes: rg.firstLoadBytes,
+    measured: true,
+    edges: [],
+    hasDynamicRuntime: paths.some((p) => DYNAMIC_RUNTIME_RE.test(p)),
   };
-
-  const queue: number[] = [];
-  for (const s of collectSeeds(graph, route)) {
-    const had = index.has(s);
-    const i = intern(s);
-    if (!succ[0].includes(i)) succ[0].push(i);
-    if (!had) queue.push(i);
-  }
-  for (let q = 0; q < queue.length; q++) {
-    const u = queue[q];
-    const seen = new Set<number>();
-    for (const dep of graph.modules.get(idents[u])?.dependencies.sync ?? []) {
-      const had = index.has(dep);
-      const v = intern(dep);
-      if (v === u || seen.has(v)) continue;
-      seen.add(v);
-      succ[u].push(v);
-      if (!had) queue.push(v);
-    }
-  }
-  const n = idents.length;
-
-  const paths = idents.map((id) => (id ? normalizeModulePath(graph.modules.get(id)?.path ?? id) : ""));
-  const bytes = new Array<number>(n).fill(0);
-  const counted = new Set<string>();
-  for (let i = 1; i < n; i++) {
-    if (counted.has(paths[i])) continue;
-    counted.add(paths[i]);
-    bytes[i] = parts.get(paths[i]) ?? 0;
-  }
-
-  const preds: number[][] = Array.from({ length: n }, () => []);
-  for (let u = 0; u < n; u++) for (const v of succ[u]) preds[v].push(u);
-
-  // BFS parents for shortest chains.
-  const parent = new Array<number>(n).fill(-1);
-  parent[0] = 0;
-  const bfs = [0];
-  for (let q = 0; q < bfs.length; q++) {
-    for (const v of succ[bfs[q]]) {
-      if (parent[v] === -1) {
-        parent[v] = bfs[q];
-        bfs.push(v);
-      }
-    }
-  }
 
   // Iterative DFS postorder, then Cooper-Harvey-Kennedy dominators.
   const post = new Array<number>(n).fill(-1);
@@ -189,11 +130,7 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): Ro
     return r;
   };
 
-  const chainTo = (v: number): string[] => {
-    const c: string[] = [];
-    for (let x = v; x !== 0; x = parent[x]) c.push(paths[x]);
-    return c.reverse();
-  };
+  const chainTo = (v: number): string[] => chainFrom(rg, parent, v);
 
   const dominates = (a: number, b: number): boolean => {
     for (let x = b; ; x = idom[x]) {
@@ -202,22 +139,91 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): Ro
     }
   };
 
-  const edges: EdgeCut[] = [];
+  const cands: Array<{ cut: EdgeCut; u: number; v: number; forceExact?: boolean }> = [];
   for (let u = 1; u < n; u++) {
     if (parent[u] === -1) continue;
     for (const v of succ[u]) {
       // Another entry into v that v doesn't dominate keeps v alive => 0 unique bytes.
-      if (!preds[v].every((p) => p === u || dominates(v, p))) continue;
+      // Exception: v is also pulled in by an injected entry (instrumentation-client): keep it for the exact
+      // check below so the win is reported as static-elsewhere instead of vanishing.
+      const shared = !preds[v].every((p) => p === u || dominates(v, p));
+      if (shared && !(rg.fromInjected[v] && !rg.fromInjected[u] && isAppSourcePath(paths[u]))) continue;
       const uniqueBytes = domBytes[v];
       if (uniqueBytes < minBytes || uniqueBytes <= 0) continue;
-      edges.push({
-        edge: { importer: paths[u], imported: paths[v], packageName: packageNameFromPath(paths[v]) },
-        chain: [...chainTo(u), paths[v]],
-        uniqueBytes,
-        subtreeBytes: subtreeBytes(v),
+      cands.push({
+        u,
+        v,
+        ...(shared ? { forceExact: true } : {}),
+        cut: {
+          edge: { importer: paths[u], imported: paths[v], packageName: packageNameFromPath(paths[v]) },
+          chain: [...chainTo(u), paths[v]],
+          uniqueBytes,
+          subtreeBytes: subtreeBytes(v),
+        },
       });
     }
   }
+  // Exact re-check for the top candidates: remove only this edge and recompute reachability by path.
+  // Catches the same file reached under another module ident (dominators work on idents) and records
+  // the other static chains that keep it alive. An edge that turns out to save nothing stays, at 0 bytes.
+  cands.sort((a, b) => b.cut.uniqueBytes - a.cut.uniqueBytes);
+  [...cands.slice(0, EXACT_CHECK_LIMIT), ...cands.slice(EXACT_CHECK_LIMIT).filter((c) => c.forceExact)].forEach(({ cut, u, v }) => {
+    const without = parentsWithout(rg, (a, b) => a === u && b === v);
+    const exact = lostBytes(rg, without);
+    const also: string[][] = [];
+    for (let i = 1; i < n && also.length < MAX_ALSO_CHAINS; i++) {
+      if (paths[i] !== paths[v] || without[i] === -1) continue;
+      for (const p of preds[i]) {
+        if (p === 0 || (p === u && i === v) || without[p] === -1) continue;
+        also.push([...chainFrom(rg, without, p), paths[i]]);
+        if (also.length >= MAX_ALSO_CHAINS) break;
+      }
+    }
+    if (also.length) cut.alsoReachableVia = also;
+    if (exact < cut.uniqueBytes) cut.uniqueBytes = exact;
+  });
+  // Turbopack collapses re-exports inside side-effect-free packages, so an injected entry that imports `@sentry/nextjs`
+  // may show no edge to `@sentry/replay` even though the former bundles the latter. If the cut target's package is a
+  // declared dependency (transitively, among packages in this route graph) of a package an injected entry reaches,
+  // treat it as statically reachable elsewhere: a dynamic import of it saves nothing.
+  if (projectRoot) {
+    const roots = new Map<string, string>(); // package -> module root dir
+    const firstNode = new Map<string, number>();
+    for (let i = 1; i < n; i++) {
+      const name = packageNameFromPath(paths[i]!);
+      if (!name || roots.has(name)) continue;
+      const m = "node_modules/";
+      roots.set(name, paths[i]!.slice(0, paths[i]!.lastIndexOf(m) + m.length + name.length));
+      firstNode.set(name, i);
+    }
+    const injectedFrom = new Map<string, number>(); // package reachable from an injected entry -> that node
+    for (let i = 1; i < n; i++) {
+      const name = packageNameFromPath(paths[i]!);
+      if (name && rg.fromInjected[i] && !FRAMEWORK_PKGS.has(name) && !injectedFrom.has(name)) injectedFrom.set(name, i);
+    }
+    const injectedEntry = paths[succ[0].find((i) => rg.fromInjected[i] && packageNameFromPath(paths[i]!) === null) ?? injectedFrom.get([...injectedFrom.keys()][0]!)!] ?? "";
+    if (injectedFrom.size > 0) {
+      const via = new Map<string, string>(); // package -> injected-reachable package that (transitively) declares it
+      const queue = [...injectedFrom.keys()];
+      for (const k of queue) via.set(k, k);
+      for (let q = 0; q < queue.length; q++) {
+        const cur = queue[q]!;
+        for (const dep of declaredDeps(projectRoot, roots.get(cur) ?? "")) {
+          if (!roots.has(dep) || via.has(dep) || FRAMEWORK_PKGS.has(dep)) continue;
+          via.set(dep, via.get(cur)!);
+          queue.push(dep);
+        }
+      }
+      for (const c of cands) {
+        const pkg = c.cut.edge.packageName;
+        const holder = pkg ? via.get(pkg) : undefined;
+        if (!pkg || !holder || holder === pkg || c.cut.alsoReachableVia?.length || packageNameFromPath(paths[c.u]!) === holder) continue;
+        c.cut.alsoReachableVia = [[injectedEntry, `${roots.get(holder)} (declares dependency ${pkg})`, paths[c.v]!]];
+        c.cut.uniqueBytes = 0;
+      }
+    }
+  }
+  const edges = cands.map((c) => c.cut).filter((c) => c.uniqueBytes >= minBytes || c.alsoReachableVia);
   edges.sort((a, b) => b.uniqueBytes - a.uniqueBytes || a.edge.imported.localeCompare(b.edge.imported));
   result.edges = edges;
   return result;

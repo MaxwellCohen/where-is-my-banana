@@ -16,7 +16,7 @@ One loop: measure, pick the top safe win, edit, re-measure, keep or revert.
 ```bash
 pnpm exec next analyze --output --snapshot wins   # Next 16.4+
 pnpm exec next analyze export --snapshot wins > .wimb/graph.jsonl
-cp .wimb/wins.json .wimb/wins.prev.json 2>/dev/null   # baseline for step 4
+pnpm exec wimb verify --init --cwd . --analyze-export .wimb/graph.jsonl --no-analyze   # baseline for step 4 (or: cp .wimb/wins.json .wimb/wins.prev.json)
 pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl
 ```
 
@@ -25,7 +25,11 @@ pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl
 - No local checkout: see `skills/run-wimb-npx`.
 - Optional tree view: `skills/visualize-analyze-export`.
 
+Also useful: `wimb wins --packages` (or `wimb why --table`) lists the heaviest node_modules packages and who imports them; `wimb why <pkg>` explains one.
+
 ## 2. Pick a win
+
+First read the "Barrels that defeat lazy loading" section of `.wimb/wins.md` (`barrels[]`): fix those first (import the component file directly in the listed importers, or split the barrel), because lazy wins on barrel-reachable modules save nothing. `routes[]` reports `firstLoadBytes` (static closure) plus `preloadedBytes`/`onDemandBytes`; a `lazy` win with `movesToPreloadedBytes` only shifts bytes from first-load to preloaded unless the component renders conditionally.
 
 Read `.wimb/wins.json` (`WinsReport`). Wins are sorted by `totalSavedBytes` desc. Take the first with `safety: "safe"`. Skip `needs-review` for now.
 
@@ -34,7 +38,7 @@ Read `.wimb/wins.json` (`WinsReport`). Wins are sorted by `totalSavedBytes` desc
 Use `win.edit`: `originalImport` is the line to replace, `replacementImport` the new code, `steps` the ordered instructions. Open `edge.importer` at `loc.line` first.
 
 Per `fixKind`:
-- `lazy`: replace the static import with `next/dynamic` (`ssr: false` only if the component is not needed for first paint).
+- `lazy`: replace the static import with `next/dynamic` (keep SSR on; never add `ssr: false`).
 - `move-to-server`: remove `'use client'` or move the logic into a server component; pass data as props.
 - `swap-package`: replace the dependency with the lighter one named in `steps`; update imports.
 - `deep-import`: import from the subpath instead of the barrel.
@@ -46,22 +50,41 @@ Edge cases:
 - **Event-handler-only** (`usage: "event-handler-only"`): do not use `next/dynamic`; load inside the handler with `const { X } = await import('pkg')`.
 - **Conditional render**: keep the condition; dynamic import goes at module top level, not inside the component.
 
+- `guard-heavy`: keep the cheap pre-check, `await import()` the library only when needed (`needs-review`, `behavior-change`): compare old/new output on sample inputs.
+
+For `lazy` and `guard-heavy` wins read `testImpact`: update/run the listed tests (sync `getBy*` becomes `await findBy*`, fake timers, snapshots) using `testImpact.command`; the optional `setupMock` makes `next/dynamic` resolve eagerly in tests.
+
+After the loop, `wimb validate` checks the graph numbers against the built route HTML (`--strict` to fail on >15% drift).
+
 ### Never edit `needs-review` without checking `safetyReasons`
 
 | Reason | Meaning | Check before editing |
 |---|---|---|
 | `above-the-fold` | Rendered unconditionally near the top of a page/layout | Lazy loading will hurt LCP/CLS. Only proceed if a `loading` placeholder keeps layout stable, or skip. |
-| `needs-ssr` | Likely needed for first paint or SEO | Do not use `ssr: false`. Use `dynamic` with SSR on, or skip. |
+| `needs-ssr` | Likely needed for first paint or SEO | Use `dynamic` with SSR on, or skip. |
 | `named-export` | `next/dynamic` needs `.then(m => m.X)` | Mechanical; confirm the export name. |
 | `no-default-export` | Module has no default export | Same mapping as above. |
 | `already-in-suspense` | Already under a Suspense boundary | Likely already deferred; confirm the import is actually still sync in the graph before changing. |
 | `shared-with-eager-route` | Another route imports it eagerly | Saving is partial. Check `routes` and whether those routes can change too; expect a smaller delta. |
+| `static-elsewhere` | `alsoReachableVia` shows another static chain that keeps the module | Cutting this edge alone saves little or nothing. Cut or lazy-load those chains too, or skip. |
+| `barrel-defeats-lazy` | A barrel re-export keeps the module statically reachable | Rewrite the listed importers to import the component file directly, then re-run. |
+| `behavior-change` | `guard-heavy`: pre-check path replaces the library for trivial input | Verify output equality on sample inputs. |
+| `net-negative-risk` | `predictedSavedBytes` is under ~2 KB after the `next/dynamic` runtime | Skip unless the route already ships `next/dynamic`. |
+| `client-stub` | `stub-alias`: stub a server-only package out of the client bundle | Create the stub, add the browser-only alias (Turbopack `resolveAlias` / webpack `!isServer`), and confirm no client code calls the package; test the server path still works. |
 | `unresolved-usage` | No JSX or handler usage found | Open the file and find real usages (re-exports, props, refs) by hand. If unclear, skip. |
 
 ## 4. Verify
 
+After EACH single edit (one win at a time), rebuild, re-run the analyze/export commands from step 1, then:
+
 ```bash
-pnpm exec next build            # then re-run the analyze/export commands from step 1
+pnpm exec wimb verify --win '<win.id>' --revert --accept --cwd . --analyze-export .wimb/graph.jsonl --no-analyze
+```
+
+It prints per-route first-load/preloaded/on-demand deltas, exits 1 and reverts only that win's files (`git checkout --`; add `--files <path>` for extra files you touched) when first-load rose or the target route did not improve, and on success rotates the baseline. Failed ids are remembered in `.wimb/verify.json` and shown as `failed-previously` by later `wins` runs. Manual alternative:
+
+```bash
+pnpm exec next build
 pnpm exec wimb wins --cwd . --analyze-export .wimb/graph.jsonl --compare .wimb/wins.prev.json
 pnpm exec tsc --noEmit && pnpm test
 ```
@@ -69,6 +92,8 @@ pnpm exec tsc --noEmit && pnpm test
 Confirm the targeted win is gone (or smaller) and the byte delta is positive and close to `totalSavedBytes`. Also confirm no other route's `firstLoadBytes` grew and typecheck and tests pass. Run `win.edit.verify` if present.
 
 If the delta is not realized, or anything regressed: `git checkout -- <files>` and move to the next win. Then `cp .wimb/wins.json .wimb/wins.prev.json` before the next iteration.
+
+After any `lazy` win, the saving is only real if bytes dropped: compare `firstLoadBytes` before/after with `--compare` and **revert the change if the route did not shrink** (a chunk can stay in first load via another static chain or an SSR-rendered `dynamic`). Use `pnpm exec wimb why <pkg>` (or `wimb packages --why <pkg>`; `wimb packages` lists bytes by package) to see every import chain keeping a package in the bundle. Lazy wins on always-rendered components have `predictedSavedBytes: 0` (they only move bytes to preloaded): skip them unless the component renders conditionally. Rank by `predictedSavedBytes` (falls back to `totalSavedBytes`) and read `confidence`.
 
 ## 5. Stop when
 

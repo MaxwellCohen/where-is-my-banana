@@ -26,6 +26,86 @@ describe("analyzeImportUsage", () => {
     expect(u.usage).toBe("conditional-render");
   });
 
+  it("|| with negated operand is always-rendered", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({m,o}){ return <div>{m === \"a\" || !o ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("always-rendered");
+  });
+
+  it("?? with negated operand is always-rendered", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({m,o}){ return <div>{m ?? !o ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("always-rendered");
+  });
+
+  it("|| of comparisons stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({t}){ return <div>{t === \"a\" || t === \"b\" ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("&& guard around || stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({m,o,open}){ return <div>{open && (m || !o) ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("!(a || b) stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,b}){ return <div>{!(a || b) ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("plain ternary stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({s}){ return <div>{s ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("(a || !o) && X is always-rendered", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ return <div>{(a || !o) && <Chart/>}</div> }", edge);
+    expect(u.usage).toBe("always-rendered");
+  });
+
+  it("if (a || !o) return X is always-rendered", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ if (a || !o) { return <Chart/> } return null }", edge);
+    expect(u.usage).toBe("always-rendered");
+  });
+
+  it("|| ternary inside a real guard stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o,ready}){ return <div>{ready && (a || !o ? <Chart/> : null)}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("ternary else branch is conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ return <div>{(a || !o) ? null : <Chart/>}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("if/else branch is conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ if (a || !o) { return null } else { return <Chart/> } }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("!a && !b stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,b}){ return <div>{!a && !b ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("!a && !b && X stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,b}){ return <div>{!a && !b && <Chart/>}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("!!x inside || stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ return <div>{a === 1 || !!o ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("&& of negations under || stays conditional", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({x,a,b}){ return <div>{x || (!a && !b) ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("conditional-render");
+  });
+
+  it("TS as-wrapped || guard is always-rendered", () => {
+    const u = analyzeImportUsage("app/page.tsx", imp + "export default function P({a,o}){ return <div>{(a || !o) as boolean ? <Chart/> : null}</div> }", edge);
+    expect(u.usage).toBe("always-rendered");
+  });
+
   it("event-handler only", () => {
     const u = analyzeImportUsage(
       "app/page.tsx",

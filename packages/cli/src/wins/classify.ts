@@ -4,8 +4,12 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { loadDataTables } from "../data/index.js";
 import { loadReplacements } from "../external/module-replacements.js";
-import { analyzeImportUsage, moduleFacts, type ImportUsage } from "./usage-analyze.js";
+import { analyzeImportUsage, findGuardCandidate, moduleFacts, type GuardCandidate, type ImportUsage } from "./usage-analyze.js";
+import { buildGuardEdit, guardKindFor } from "./guard-heavy.js";
+import { buildMarkdownPipelineEdit, findUnifiedPipeline, pipelineCandidate } from "./markdown-pipeline.js";
+import { attachTestImpact } from "./test-impact.js";
 import type {
+  Confidence,
   EdgeCut,
   FixKind,
   RouteAttribution,
@@ -40,9 +44,17 @@ export function detectFramework(projectRoot: string): Framework {
 
 const DROP_BELOW_BYTES = 10 * 1024;
 
+/** Conservative gz cost of next/dynamic (loadable + lazy wrapper) when the route doesn't already ship it. */
+export const DYNAMIC_RUNTIME_BYTES = 1536;
+/** Predicted savings below this are not worth the extra request / layout risk. */
+export const MIN_PREDICTED_SAVING_BYTES = 2048;
+
 interface Group {
   cut: EdgeCut;
   routes: Record<string, number>;
+  /** every route in the group already ships dynamic-import runtime */
+  dynamicRuntime: boolean;
+  alsoReachableVia?: string[][];
 }
 
 /**
@@ -60,12 +72,14 @@ function mergeEdges(attributions: RouteAttribution[]): Group[] {
       const key = `${cut.edge.importer}\0${cut.edge.imported}`;
       let g = groups.get(key);
       if (!g) {
-        g = { cut, routes: {} };
+        g = { cut, routes: {}, dynamicRuntime: true };
         groups.set(key, g);
       } else if (cut.chain.length < g.cut.chain.length) {
         g.cut = { ...cut, loc: cut.loc ?? g.cut.loc };
       }
       g.routes[attr.route] = Math.max(g.routes[attr.route] ?? 0, cut.uniqueBytes);
+      if (!attr.hasDynamicRuntime) g.dynamicRuntime = false;
+      if (cut.alsoReachableVia && !g.alsoReachableVia) g.alsoReachableVia = cut.alsoReachableVia;
     }
   }
   return dedupeChains([...groups.values()]);
@@ -104,6 +118,7 @@ async function readText(path: string): Promise<string | null> {
   }
 }
 
+const kb = (n: number) => (n / 1024).toFixed(1);
 const isIdent = (s: string) => /^[A-Za-z_$][\w$]*$/.test(s);
 
 const LAZY_IMPORT: Partial<Record<Framework, string>> = {
@@ -175,8 +190,10 @@ export async function classifyWins(
 
     // imported-module facts (local files only)
     let facts: ReturnType<typeof moduleFacts> | null = null;
+    let importedSrc: string | null = null;
     if (!isPackage) {
       const src = await readText(join(ctx.projectRoot, edge.imported));
+      importedSrc = src ?? null;
       if (src) {
         try {
           facts = moduleFacts(edge.imported, src);
@@ -195,10 +212,19 @@ export async function classifyWins(
     const swapTarget = isPackage ? replacements.get(edge.packageName!) : undefined;
     const isHeavy = isPackage && data.heavyPackages.has(edge.packageName!);
     const deferredUse = usage === "conditional-render" || usage === "event-handler-only";
+    const guard: GuardCandidate | null =
+      isPackage && importerSrc && !isRemove && usage !== "event-handler-only" && guardKindFor(edge.packageName!)
+        ? (findGuardCandidate(edge.importer, importerSrc, edge) ?? pipelineCandidate(edge.importer, importerSrc, edge.packageName!))
+        : null;
+
+    // First-party edge into a module that hosts a unified/remark pipeline: guard the pipeline there instead of lazy-loading the module.
+    const localPipe: GuardCandidate | null =
+      !isPackage && !guard && importedSrc && usage !== "event-handler-only" ? pipelineCandidate(edge.imported, importedSrc, "unified") : null;
 
     let fixKind: FixKind | null = null;
     if (isRemove) fixKind = "remove";
     else if (namedFromRoot && data.barrelPackages.has(edge.packageName!)) fixKind = "deep-import";
+    else if (guard || localPipe) fixKind = "guard-heavy";
     else if (isPackage && (isHeavy || swapTarget) && !deferredUse) fixKind = "swap-package";
     else if (
       !isPackage &&
@@ -216,7 +242,7 @@ export async function classifyWins(
 
     const determined = fixKind !== null;
     if (!fixKind) {
-      if (usage === "unknown" && total < DROP_BELOW_BYTES) continue;
+      if (usage === "unknown" && total < DROP_BELOW_BYTES && !g.alsoReachableVia) continue;
       fixKind = "lazy";
     }
 
@@ -236,7 +262,30 @@ export async function classifyWins(
     );
     if (others.length > 0) reasons.add("shared-with-eager-route");
 
-    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement);
+    // Predicted saving: measured saving minus the lazy-loading runtime (component form only; handler import() is ~free).
+    // Lazy-loading an always-rendered component in a server-rendered importer only moves it from first-load to
+    // "preloaded": Next still emits preload tags for its chunk, so first-load bytes don't drop.
+    const movesToPreloaded = fixKind === "lazy" && (usage === "always-rendered" || usage === "unknown") && !!u?.found && total > 0;
+    let predicted = total;
+    if (fixKind === "lazy" && usage !== "event-handler-only" && !g.dynamicRuntime) predicted = Math.max(0, total - DYNAMIC_RUNTIME_BYTES);
+    if (movesToPreloaded) predicted = 0;
+    if (g.alsoReachableVia?.length) reasons.add("static-elsewhere");
+    if (fixKind === "lazy" && predicted < MIN_PREDICTED_SAVING_BYTES) reasons.add("net-negative-risk");
+    let confidence: Confidence = "high";
+    if (g.alsoReachableVia?.length || usage === "unknown" || usage === "always-rendered") confidence = "low";
+    else if (fixKind === "lazy" && (usage === "conditional-render" || predicted < MIN_PREDICTED_SAVING_BYTES * 2)) confidence = "medium";
+    if (g.alsoReachableVia?.length && total === 0) predicted = 0;
+
+    if (fixKind === "guard-heavy") {
+      reasons.add("behavior-change");
+      if (confidence === "high") confidence = "medium";
+    }
+
+    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard, importerSrc, localPipe ? importedSrc : null);
+    if (movesToPreloaded) {
+      edit.summary += ` (moves ${kb(total)} KB from first-load to preloaded; real saving only if the component is conditional)`;
+      edit.steps.push("This only moves bytes from first-load to preloaded: the dynamic chunk is still preloaded on server render. Real transfer savings need the component to render conditionally (tab, modal, below-the-fold); otherwise the gain is parse/hydrate time.");
+    }
     wins.push({
       id: `${fixKind}:${edge.importer}:${edge.imported}`,
       fixKind,
@@ -244,23 +293,32 @@ export async function classifyWins(
       safetyReasons: [...reasons],
       usage,
       edge,
-      loc: g.cut.loc,
+      loc: g.cut.loc ?? u?.importLoc,
       usageLoc: u?.usageLoc,
       routes: g.routes,
       totalSavedBytes: total,
       byteSource: ctx.byteSource,
       chain: g.cut.chain,
       edit,
+      ...(g.alsoReachableVia ? { alsoReachableVia: g.alsoReachableVia } : {}),
+      predictedSavedBytes: predicted,
+      confidence,
+      ...(movesToPreloaded ? { movesToPreloadedBytes: total } : {}),
     });
   }
 
-  wins.sort(
+  sortWins(wins);
+  await attachTestImpact(wins, ctx.projectRoot);
+  return wins;
+}
+
+export function sortWins(wins: Win[]): Win[] {
+  return wins.sort(
     (a, b) =>
-      b.totalSavedBytes - a.totalSavedBytes ||
+      (b.predictedSavedBytes ?? b.totalSavedBytes) - (a.predictedSavedBytes ?? a.totalSavedBytes) ||
       (a.safety === b.safety ? 0 : a.safety === "safe" ? -1 : 1) ||
       a.id.localeCompare(b.id),
   );
-  return wins;
 }
 
 function buildEdit(
@@ -271,6 +329,9 @@ function buildEdit(
   ctx: ClassifyContext,
   routes: string[],
   replacement: string | undefined,
+  guard: GuardCandidate | null = null,
+  importerSrc: string | null = null,
+  localPipeSrc: string | null = null,
 ): WinEdit {
   const target = edge.packageName ?? edge.imported;
   const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare .wimb/wins.json  # rebuild + compare routes: ${routes.join(", ")}`;
@@ -279,6 +340,8 @@ function buildEdit(
   const names = u?.bindings.map((b) => b.local).join(", ") ?? "";
 
   switch (fixKind) {
+    case "stub-alias": // built by detectStubWins; never reached through classifyWins
+      return { summary: `Stub ${target} on the client`, steps: [], verify };
     case "remove":
       return {
         summary: `Remove unused import of ${target} from ${file}`,
@@ -312,6 +375,29 @@ function buildEdit(
         ],
         verify,
       };
+    case "guard-heavy": {
+      if (localPipeSrc) {
+        const lp = findUnifiedPipeline(edge.imported, localPipeSrc);
+        const e = lp ? buildMarkdownPipelineEdit(lp, edge.imported) : null;
+        return {
+          summary: e?.summary ?? `Guard the markdown pipeline in ${edge.imported} behind a cheap pre-check`,
+          originalImport: original,
+          replacementImport: e?.replacementImport,
+          steps: e?.steps ?? [`Add a cheap pre-check before the unified pipeline in ${edge.imported} and import it on demand.`],
+          verify,
+        };
+      }
+      const pipe = guard && importerSrc && edge.packageName ? findUnifiedPipeline(file, importerSrc) : null;
+      const inPipe = !!pipe && pipe.imports.some((x) => x.spec === edge.packageName || x.spec.startsWith(`${edge.packageName}/`));
+      const g = inPipe ? buildMarkdownPipelineEdit(pipe!, file) : guard && edge.packageName ? buildGuardEdit(edge.packageName, guard, file) : null;
+      return {
+        summary: g?.summary ?? `Guard ${target} behind a cheap pre-check in ${file}`,
+        originalImport: original,
+        replacementImport: g?.replacementImport,
+        steps: g?.steps ?? [`Add a cheap pre-check before calling ${target} in ${file} and import it on demand.`],
+        verify,
+      };
+    }
     case "move-to-server":
       return {
         summary: `Render ${edge.imported} from a Server Component instead of the "use client" file ${file}`,
@@ -345,8 +431,7 @@ function buildEdit(
         };
       }
       const fw = ctx.framework ?? "next";
-      const ssrFalse = fw === "next" && usage !== "always-rendered" && (u.isClient || !u.isPageOrLayout);
-      const opts = ssrFalse ? "{ ssr: false, loading: () => null }" : "{ loading: () => null }";
+      const opts = "{ loading: () => null }";
       const stepsNamed = u.bindings.some((b) => b.kind === "named");
       const helper = { next: "next/dynamic", react: "React.lazy", preact: "preact/compat lazy", solid: "solid-js lazy", vue: "defineAsyncComponent", svelte: "dynamic import()", generic: "dynamic import()" }[fw];
       const header = fw === "next" ? [`import dynamic from 'next/dynamic';`] : LAZY_IMPORT[fw] ? [LAZY_IMPORT[fw]!] : [];
@@ -366,11 +451,7 @@ function buildEdit(
           ...boundary,
           "If the binding is a value (not a component), `await import()` it where first used instead.",
           ...(fw === "next"
-            ? [
-                ssrFalse
-                  ? "ssr:false is safe because the component renders only conditionally."
-                  : "Keep SSR enabled (above-the-fold content); consider a sized loading placeholder to avoid layout shift.",
-              ]
+            ? ["Keep SSR enabled (do not add ssr:false: it hurts SEO/LCP/CLS and is invalid in Server Components); use a sized loading placeholder to avoid layout shift."]
             : []),
           "Confirm no layout shift when the component appears.",
         ],

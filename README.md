@@ -74,12 +74,29 @@ Bump `packages/cli/package.json` version on `main`, then push a matching tag (`g
 
 - **First-load JS per route**: compressed client bytes a visitor downloads for that route.
 - **uniqueBytes**: bytes that leave a route if exactly one import edge is cut (what is reachable only through it).
-- **Win**: an edge cut with a fix kind (`lazy`, `move-to-server`, `swap-package`, `deep-import`, `remove`) and a safety rating (`safe` or `needs-review` with reasons such as `above-the-fold`, `needs-ssr`).
+- **Win**: an edge cut with a fix kind (`lazy`, `move-to-server`, `swap-package`, `deep-import`, `remove`, `stub-alias`) and a safety rating (`safe` or `needs-review` with reasons such as `above-the-fold`, `needs-ssr`).
+- `predictedSavedBytes` = measured saving minus the lazy-loading runtime (about 1.5 KB for `next/dynamic` when the route doesn't already ship it); `confidence` is `high|medium|low`. `alsoReachableVia` lists other static import chains that keep the module in the route (reason `static-elsewhere`); wins predicted at under 2 KB are `net-negative-risk`. Both are demoted to `needs-review` and excluded from `--fail-on-safe-wins`. Always verify with `--compare`.
+- `stub-alias` (reason `client-stub`): a node-only-looking package reached only through barrel re-exports of a `"sideEffects": false` package. The win carries a browser-only `turbopack.resolveAlias` / webpack client alias plus stub file content. Heuristic (regex over re-exports, not a full parse); check the client never calls it.
+- Lazy wins on always-rendered, server-rendered components only move bytes from first-load to preloaded: `predictedSavedBytes` is 0 (`net-negative-risk`, `needs-review`) and `movesToPreloadedBytes` says how much moves.
+- Next's injected `instrumentation-client` (plus `instrumentation`/`middleware`/`proxy` when client-bundled) is seeded as an entry of every route, so a package it imports statically yields `static-elsewhere` (low confidence) on lazy wins of that package.
+- `stub-alias` also fires (medium confidence) for packages with node-only signals (no `browser` mapping + node builtins, `-server`/`-node-` in the name) that are imported directly or via non-`sideEffects:false` barrels.
+- `guard-heavy` covers the unified/remark/rehype/micromark/mdast/hast/markdown-it/marked stack; a `unified().use(...)` pipeline gets a generated edit (async wrapper with dynamic imports, or a memoized `getProcessor()` at module scope).
 - `totalSavedBytes` sums a win across routes; `byteSource` says `measured` or `estimated`.
 
 ## Agent loop
 
-Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply `edit`, rebuild, run `wimb wins --compare .wimb/wins.prev.json`, keep only if the byte delta is realized.
+Give your agent `skills/reduce-client-js/SKILL.md`: pick the top safe win, apply `edit`, then run `wimb verify --win <id> --revert --accept`.
+
+```bash
+npx @maxwellcohen/wimb verify --init                       # once: baseline -> .wimb/wins.prev.json
+# ...apply one win's edit...
+npx @maxwellcohen/wimb verify --win <id> --revert --accept # rebuild, per-route first-load/preloaded/on-demand deltas
+```
+
+- Fails (exit 1) when any route's first-load rises by more than `--tolerance` (default 200 B), or the win's target routes don't improve. The verdict (`kept|failed|neutral`) is written to `.wimb/verify.json`; later `wins` runs mark failed ids `status: "failed-previously"` and demote them to `needs-review`.
+- `--revert` runs `git checkout --` on only the win's importer file plus any `--files <path>` (repeatable). It refuses untracked files and files that already had uncommitted changes when the baseline was taken (override: `--force-revert`). It never resets or cleans anything else.
+- `--accept` (on success) rotates the baseline: `.wimb/wins.json` -> `.wimb/wins.prev.json`. Baseline defaults to `.wimb/wins.prev.json`, falling back to `.wimb/wins.json`.
+- Same graph flags as `wins` (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`).
 
 ## CI budget
 
@@ -93,11 +110,89 @@ npx @maxwellcohen/wimb wins --cwd . \
 - `--budget-route <bytes>`: fail if any route's first-load JS exceeds the budget.
 - `--fail-on-safe-wins <bytes>`: fail if unclaimed safe wins total more than this.
 
+## Why is X in my bundle?
+
+```bash
+npx @maxwellcohen/wimb why moment --cwd .          # package, path fragment or glob (@scope/*)
+```
+
+Prints the shortest import chain from the route entry, subtree/unique bytes, and up to `--chains N` (default 3) alternative chains with distinct first hops, each with the edge to cut and whether other chains keep it alive. Flags: `--route <substr>`, `--all-routes`, `--json`, plus the `wins` data flags (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`). Exits 1 if it is not in the client graph (says so when it is server-only).
+
+`wimb why --table` (no target) and `wimb wins --packages` print the node_modules packages in client first-load: package, gzip KB, % of route, route count and the top first-party importer (top 25; also `packages[]` in `wins.json` and a table in `wins.md`).
+
+## First-load vs preloaded vs on-demand
+
+Route first-load is the static import closure only. Dynamic chunks (`import()`, `next/dynamic`, `React.lazy`) are reported separately as `preloadedBytes` (server-rendered, unconditional dynamic components, which Next still preloads) and `onDemandBytes` (conditional, handler-only, `ssr:false`, library-internal). A `lazy` win on an always-rendered component only moves bytes from first-load to preloaded (`movesToPreloadedBytes`); the real transfer saving needs the component to render conditionally. `--compare` shows preloaded deltas too. Older reports without these fields still load.
+
+## Validate against the real build
+
+```bash
+npx @maxwellcohen/wimb validate --cwd .                   # .next/server/{app,pages}/*.html
+npx @maxwellcohen/wimb validate --html-dir out/ --tolerance 0.15 --strict
+npx @maxwellcohen/wimb validate --url https://staging.example.com   # polite sequential GETs
+```
+
+Reads `.wimb/wins.json`, sums the `<script src>` bytes (first-load) and `preload`/`modulepreload`-only chunks referenced in each route's HTML (raw + gzip), compares gzip to the graph `firstLoadBytes`, and flags routes off by more than the tolerance (default 15%) with likely reasons (compression mismatch, dynamic preloads, framework/polyfill chunks, route not prerendered). Writes `.wimb/validation.json` and a Validation section in `wins.md`; exits 1 only with `--strict`.
+
+## Barrels, guard-heavy, test impact
+
+- `wins.md` has a "Barrels that defeat lazy loading" section (`barrels[]` in `wins.json`): a module that is lazy-loaded, or a proposed lazy win, that is still statically reachable through a barrel (`export * from`), with the importers (file:line) to rewrite to import the component file directly. Such wins get the `barrel-defeats-lazy` reason. `wimb speed` lists them as needs-review JS bundle items. Fix these first.
+- `guard-heavy` wins (markdown/sanitize/highlight/math/date/yaml libs called inside plain functions) keep a cheap regex pre-check and `await import()` the library only when needed. Always `needs-review` (`behavior-change`): compare outputs on sample inputs.
+- `lazy` and `guard-heavy` wins carry `testImpact`: tests that import the affected component (directly or one hop) with warnings (sync `getBy*` vs `findBy*`, fake timers, snapshots), the detected vitest/jest command (prepended to `verify`) and an optional `next/dynamic` setup mock.
+
+## Bytes by package
+
+```bash
+npx @maxwellcohen/wimb packages --top 25 [--route /x] [--json]
+npx @maxwellcohen/wimb packages --why moment   # same as `wimb why moment`: import chains + cut analysis
+```
+
+Uses one BFS with parent pointers per route and caps chains, so it stays fast on very large graphs.
+
 ## Other commands
 
-- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`. Invalid flag values exit 2.
+- `wimb wins` flags: `--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite` (auto-detected), `--analyze` / `--no-analyze` (run `next analyze` first; default on), `--min-bytes`, `--top N`, `--json`, `--compare <wins.json>`, `--budget-route <bytes>`, `--fail-on-safe-wins <bytes>`, `--packages`. Invalid flag values exit 2. `wimb validate` flags: `--cwd`, `--wins`, `--dist-dir`, `--html-dir`, `--url`, `--tolerance`, `--strict`, `--json`.
 - `wimb viz build` builds `.wimb/bundle-graph.json` for the `@wimb/visualizer` app (`skills/visualize-analyze-export`). Flags: `--analyze-export`, `--dist-dir`, `--output`, `--cwd`, `--async`, `--traced`, `--vite`.
 - `wimb scan` is the legacy source scan (`.wimb/wimb-report.json`); playbooks in `skills/fix-client-bloat`. Flags: `--cwd`, `--build` (deep scan via `next analyze`), `--dist-dir`, `--snapshot`, `--analyze-export`, `--format json,md`, `--exit-threshold error|warning|info`, `--forest-compact`, `--no-ast` (alias of `--forest-compact`).
+
+## Whole-site audit
+
+`wimb audit` is a fast, build-free static audit for Next.js App Router / CMS-driven sites. It reads source files and every workspace `package.json` (skips `node_modules`, `.next`, `dist`, `.wimb`, `.git`) and writes `.wimb/audit.json` and `.wimb/audit.md` (a "Do these first" list, then findings by severity and check, each with a concrete fix). Registry/boundary/barrel rules live in `wimb scan`.
+
+Flags: `--cwd`, `--json` (print JSON to stdout), `--top N` (per check, default 10), `--checks a,b,c`, `--fail-on high|medium` (exit 1), `--fix`, `--fix-dry-run`, `--force`, `--baseline`, `--save-baseline`. Invalid values exit 2. Suppress one finding with `// wimb-ignore-next-line <check>`; `wimb.config.ts` `ignores.rules` / `ignores.files` are honored.
+
+Monorepos: when `pnpm-workspace.yaml` or `package.json` `workspaces` is present, each workspace package that depends on `next` is audited separately and findings carry a `package` label. `ignores.files` accepts real globs (`*`, `**`, `?`, `{a,b}`, `[abc]`, `!negation`; a bare name matches at any depth).
+
+Autofix: `--fix-dry-run` prints a unified diff; `--fix` writes it. Only safe mechanical edits: `strategy="lazyOnload"` on non-consent third-party `<Script>` (consent managers such as OneTrust/Cookiebot are reported, never changed), non-swap font `display` to `swap`, drop `ssr: false` where the audit flags it, add `images.formats` (avif, webp) to a plain `next.config`, `priority` on a hero-named `next/image`, and `loading="lazy" decoding="async"` on raw `<img>` outside hero/header/nav/logo files. Idempotent; ambiguous spots are skipped and listed; files with unstaged git changes are skipped unless `--force`.
+
+Baseline: `--save-baseline [--baseline file]` records current findings (default `.wimb/audit-baseline.json`); `--baseline file` then reports and fails (`--fail-on`) only on NEW findings. Fingerprint = rule id + file + message with digits normalized (line numbers ignored); a repeated issue in the same file counts as new beyond the baselined count.
+
+Scoring: each finding has `impactScore` (0-100 estimate, not measured: severity base 75/45/15, +5 to +10 for sitewide or LCP checks, +10 in layouts, -5 to -10 for info-like rules) and `effort` S (minutes), M (about an hour), L (a day or more). "Do these first" ranks by impact divided by effort weight (S=1, M=2, L=4), at most 2 per check on the first pass.
+
+Checks: `third-party-script`, `raw-img`, `lcp-priority`, `image-config`, `cms-image-params`, `fonts`, `force-dynamic`, `missing-static-params`, `sequential-await`, `full-cms-payload-to-client`, `heavy-deps`, `old-browserslist`, `maps-widgets`, `middleware-scope`, `preview-code-in-prod`, `css-weight`, `use-client-inventory`, `ssr-false-misuse`, `split-candidate`. Most checks are regex heuristics; expect some false positives. `split-candidate` parses with oxc.
+
+`split-candidate` ("files worth breaking up") clusters each file's top-level declarations by shared local helpers/state (a stateless top-level component that only composes the pieces is treated as the shell, not glue; shared imports do not link clusters since each new file can import them itself). It flags files with 2+ independent clusters that are large (`splitMinLoc`) or where one cluster alone pulls a heavy package (chart/map/editor/markdown/date/pdf libs, the `heavy-deps` list, or any package measured at `splitHeavyKb`+ in `.wimb/bundle-graph.json`, which also gives the "~N KB" and weights the score). Ids: `heavy-cluster` (high when client-reachable), `low-cohesion` (medium client / low server), `god-file` (low; long but coupled), `server-eligible` (a `"use client"` file whose static part uses no hooks/handlers/browser APIs), `registry` (many components imported only to sit in a lookup map). Each `fix` is a concrete split plan (new file names, what moves, where `"use client"` goes, which module to `next/dynamic` with SSR on and a sized placeholder, importers to update, no barrel). `audit.md` ends with a "Files worth breaking up" table. Optional `wimb.config` thresholds (numeric literals): `splitMinLoc` 250, `splitMinClusterLoc` 25, `splitGodFileLoc` 600, `splitGodFileDecls` 12, `splitGodFileImports` 25, `splitServerEligibleLoc` 80, `splitRegistryMinImports` 8, `splitHeavyKb` 30. To suppress one file put `// wimb-ignore-next-line split-candidate` above its first non-import statement.
+
+## One command: `wimb speed`
+
+`wimb speed` runs the static audit, `wimb wins` (skipped with a warning if the project has no `next`/`vite` dependency or the run fails), and, when URLs are given, the live audit. It merges everything into one ranked plan: `.wimb/plan.json` and `.wimb/plan.md` (headline, speed budget, quick wins, biggest risk, "Do first (code, safe)", "Needs a human decision", "Not code (GTM/CDN/CMS)", "Later", per-page-type table when live data exists, and a paste-ready agent "Handoff prompt"). Related findings are deduped (e.g. "Defer 6 third-party scripts" with every location) and a static finding corroborated by a live one becomes a single higher-scored item. Rank = impact score / effort.
+
+```bash
+npx --yes @maxwellcohen/wimb speed --url https://example.com   # --url is optional
+npx --yes @maxwellcohen/wimb speed --prompt                    # only the agent prompt, to stdout
+npx --yes @maxwellcohen/wimb speed --snapshot                  # save plan.json as plan.prev.json
+npx --yes @maxwellcohen/wimb speed --compare                   # resolved / new / regressed vs plan.prev.json
+```
+
+Flags: `--cwd`, `--url` (repeatable or comma list), `--urls-file`, `--sitemap`, `--sample N`, `--no-wins`, `--no-live`, `--no-analyze` (passed to wins), `--top N`, `--json`, `--prompt`, `--compare`, `--snapshot`, `--fail-on high|medium` (exit 1), `--fix`, `--fix-dry-run`, `--force`, `--baseline`, `--save-baseline`. Invalid values exit 2. KB estimates are "measured" only for bundle wins; other categories use coarse per-finding heuristics and are labeled "rough".
+
+## Live runtime audit
+
+`wimb live <url...>` audits deployed pages over plain HTTP (Node 20 `fetch`, no browser). It GETs each page once, HEADs assets for sizes (ranged GET fallback), and writes `.wimb/live.json` and `.wimb/live.md` (detection header, per-page table, "Do these first", findings by check). Every finding carries `owner: code|gtm|cdn|cms`; a code agent can only fix `code`.
+
+Flags: `--urls-file`, `--sitemap <url>` + `--sample 8` (spreads samples across path patterns), `--concurrency 3`, `--timeout 15000`, `--user-agent`, `--mobile`, `--max-requests 150`, `--out .wimb`, `--json`, `--fail-on high|medium`, `--lighthouse` (runs `npx --no-install lighthouse`, first 3 pages), `--lighthouse-json <file...>` (import existing reports).
+
+Checks: `html-size`, `headers` (compression, cache, cookies, TTFB), `scripts` (+ vendor grouping), `gtm` (container size/vendors), `css`, `fonts`, `images` (+ LCP candidate), `hints`, `head`, `redirects`, `dom`, `cross-page`, `lighthouse`. These are heuristics over server-rendered HTML: client-injected resources and CSS file contents are not seen, and transfer sizes are estimated.
 
 ## Security notes
 
@@ -112,3 +207,7 @@ npx @maxwellcohen/wimb wins --cwd . \
 ## Note
 
 This is a vibe-coded proof-of-concept project. Expect rough edges.
+
+## Roadmap
+
+- Optional before/after screenshots and pixel diffs to catch visual regressions next to byte deltas (not built).

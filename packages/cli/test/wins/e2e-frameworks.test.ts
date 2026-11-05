@@ -46,8 +46,12 @@ describe("wins e2e (wins-namespace-app)", () => {
     report = await load("wins-namespace-app");
   });
 
-  it("ranks namespace barrel above conditional report", () => {
-    expect(report.wins.map((w) => w.totalSavedBytes)).toEqual([150000, 70000]);
+  it("ranks conditional report above always-rendered namespace barrel (which only moves to preloaded)", () => {
+    expect(report.wins.map((w) => w.totalSavedBytes)).toEqual([70000, 150000]);
+    const b = find(report, "app/page.tsx", "node_modules/big-icons/index.js")!;
+    expect(b.predictedSavedBytes).toBe(0);
+    expect(b.movesToPreloadedBytes).toBe(150000);
+    expect(b.safetyReasons).toContain("net-negative-risk");
   });
 
   it("namespace import -> await import, needs-review, never dynamic()", () => {
@@ -59,11 +63,11 @@ describe("wins e2e (wins-namespace-app)", () => {
     expect(w.edit.replacementImport).not.toContain("dynamic(");
   });
 
-  it("conditional HeavyReport -> safe next/dynamic ssr:false", () => {
+  it("conditional HeavyReport -> safe next/dynamic (SSR kept)", () => {
     const w = find(report, "app/reports/page.tsx", "components/HeavyReport.tsx")!;
     expect(w.fixKind).toBe("lazy");
     expect(w.safety).toBe("safe");
     expect(w.edit.replacementImport).toContain("import dynamic from 'next/dynamic';");
-    expect(w.edit.replacementImport).toContain("ssr: false");
+    expect(w.edit.replacementImport).not.toContain("ssr: false");
   });
 });
