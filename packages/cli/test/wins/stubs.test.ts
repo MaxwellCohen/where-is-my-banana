@@ -79,6 +79,17 @@ describe("detectStubWins", () => {
     expect(items[0].owner).toBe("code");
   });
 
+  it("sideEffects:false package that imports (not re-exports) the SDK inside a function -> low-confidence candidate", () => {
+    const g = synGraph(
+      { ...mods, page: { path: "app/ok.tsx", sync: ["kitIndex"] } },
+      { "/": { seeds: ["page"], bytes: { ...route["/"].bytes, "app/ok.tsx": 500 } } },
+    );
+    const wins = detectStubWins(g, { projectRoot: root });
+    expect(wins).toHaveLength(1);
+    expect(wins[0]!.stub!.package).toBe("vwo-fme-node-sdk");
+    expect(wins[0]!.confidence).toBe("low");
+  });
+
   it("negative: the app genuinely imports an export that re-exports the SDK", () => {
     write(`${A}/dist/index.js`, `export * from "./ui.js";\nexport { init, Client } from "vwo-fme-node-sdk";\n`);
     const g = synGraph(barrelMods("app/uses.tsx"), {

@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isAppSourcePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import type { EdgeCut, RouteAttribution } from "./types.js";
@@ -6,6 +8,22 @@ import { buildRouteGraph, chainFrom, lostBytes, parentsWithout } from "./reach.j
 export interface AttributeOptions {
   /** Drop edges whose uniqueBytes is below this (default 2048). */
   minBytes?: number;
+  /** Enables the declared-dependency check against injected entries (reads package.json files). */
+  projectRoot?: string;
+}
+
+const FRAMEWORK_PKGS = new Set(["next", "react", "react-dom", "scheduler"]);
+
+/** Declared (dependencies/optional/peer) package names of the package whose module lives at `moduleRoot`. */
+function declaredDeps(projectRoot: string, moduleRoot: string): string[] {
+  try {
+    const f = join(projectRoot, moduleRoot, "package.json");
+    if (!existsSync(f)) return [];
+    const j = JSON.parse(readFileSync(f, "utf-8")) as Record<string, Record<string, string> | undefined>;
+    return [...Object.keys(j.dependencies ?? {}), ...Object.keys(j.optionalDependencies ?? {}), ...Object.keys(j.peerDependencies ?? {})];
+  } catch {
+    return [];
+  }
 }
 
 const DEFAULT_MIN_BYTES = 2048;
@@ -24,7 +42,7 @@ export function attributeRoutes(graph: ParsedGraph, opts: AttributeOptions = {})
   const minBytes = opts.minBytes ?? DEFAULT_MIN_BYTES;
   const out: RouteAttribution[] = [];
   for (const route of [...graph.routes.keys()].sort()) {
-    out.push(attributeRoute(graph, route, minBytes));
+    out.push(attributeRoute(graph, route, minBytes, opts.projectRoot));
   }
   return out;
 }
@@ -34,7 +52,7 @@ const DYNAMIC_RUNTIME_RE = /next\/dist\/(?:esm\/)?(?:shared\/lib\/(?:lazy-dynami
 const EXACT_CHECK_LIMIT = 200;
 const MAX_ALSO_CHAINS = 3;
 
-function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): RouteAttribution {
+function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, projectRoot?: string): RouteAttribution {
   const rg = buildRouteGraph(graph, route);
   if (!rg) return { route, firstLoadBytes: 0, measured: false, edges: [] };
   const { succ, preds, paths, bytes, parent } = rg;
@@ -164,6 +182,47 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number): Ro
     if (also.length) cut.alsoReachableVia = also;
     if (exact < cut.uniqueBytes) cut.uniqueBytes = exact;
   });
+  // Turbopack collapses re-exports inside side-effect-free packages, so an injected entry that imports `@sentry/nextjs`
+  // may show no edge to `@sentry/replay` even though the former bundles the latter. If the cut target's package is a
+  // declared dependency (transitively, among packages in this route graph) of a package an injected entry reaches,
+  // treat it as statically reachable elsewhere: a dynamic import of it saves nothing.
+  if (projectRoot) {
+    const roots = new Map<string, string>(); // package -> module root dir
+    const firstNode = new Map<string, number>();
+    for (let i = 1; i < n; i++) {
+      const name = packageNameFromPath(paths[i]!);
+      if (!name || roots.has(name)) continue;
+      const m = "node_modules/";
+      roots.set(name, paths[i]!.slice(0, paths[i]!.lastIndexOf(m) + m.length + name.length));
+      firstNode.set(name, i);
+    }
+    const injectedFrom = new Map<string, number>(); // package reachable from an injected entry -> that node
+    for (let i = 1; i < n; i++) {
+      const name = packageNameFromPath(paths[i]!);
+      if (name && rg.fromInjected[i] && !FRAMEWORK_PKGS.has(name) && !injectedFrom.has(name)) injectedFrom.set(name, i);
+    }
+    const injectedEntry = paths[succ[0].find((i) => rg.fromInjected[i] && packageNameFromPath(paths[i]!) === null) ?? injectedFrom.get([...injectedFrom.keys()][0]!)!] ?? "";
+    if (injectedFrom.size > 0) {
+      const via = new Map<string, string>(); // package -> injected-reachable package that (transitively) declares it
+      const queue = [...injectedFrom.keys()];
+      for (const k of queue) via.set(k, k);
+      for (let q = 0; q < queue.length; q++) {
+        const cur = queue[q]!;
+        for (const dep of declaredDeps(projectRoot, roots.get(cur) ?? "")) {
+          if (!roots.has(dep) || via.has(dep) || FRAMEWORK_PKGS.has(dep)) continue;
+          via.set(dep, via.get(cur)!);
+          queue.push(dep);
+        }
+      }
+      for (const c of cands) {
+        const pkg = c.cut.edge.packageName;
+        const holder = pkg ? via.get(pkg) : undefined;
+        if (!pkg || !holder || holder === pkg || c.cut.alsoReachableVia?.length || packageNameFromPath(paths[c.u]!) === holder) continue;
+        c.cut.alsoReachableVia = [[injectedEntry, `${roots.get(holder)} (declares dependency ${pkg})`, paths[c.v]!]];
+        c.cut.uniqueBytes = 0;
+      }
+    }
+  }
   const edges = cands.map((c) => c.cut).filter((c) => c.uniqueBytes >= minBytes || c.alsoReachableVia);
   edges.sort((a, b) => b.uniqueBytes - a.uniqueBytes || a.edge.imported.localeCompare(b.edge.imported));
   result.edges = edges;

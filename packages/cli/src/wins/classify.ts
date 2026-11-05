@@ -190,8 +190,10 @@ export async function classifyWins(
 
     // imported-module facts (local files only)
     let facts: ReturnType<typeof moduleFacts> | null = null;
+    let importedSrc: string | null = null;
     if (!isPackage) {
       const src = await readText(join(ctx.projectRoot, edge.imported));
+      importedSrc = src ?? null;
       if (src) {
         try {
           facts = moduleFacts(edge.imported, src);
@@ -215,10 +217,14 @@ export async function classifyWins(
         ? (findGuardCandidate(edge.importer, importerSrc, edge) ?? pipelineCandidate(edge.importer, importerSrc, edge.packageName!))
         : null;
 
+    // First-party edge into a module that hosts a unified/remark pipeline: guard the pipeline there instead of lazy-loading the module.
+    const localPipe: GuardCandidate | null =
+      !isPackage && !guard && importedSrc && usage !== "event-handler-only" ? pipelineCandidate(edge.imported, importedSrc, "unified") : null;
+
     let fixKind: FixKind | null = null;
     if (isRemove) fixKind = "remove";
     else if (namedFromRoot && data.barrelPackages.has(edge.packageName!)) fixKind = "deep-import";
-    else if (guard) fixKind = "guard-heavy";
+    else if (guard || localPipe) fixKind = "guard-heavy";
     else if (isPackage && (isHeavy || swapTarget) && !deferredUse) fixKind = "swap-package";
     else if (
       !isPackage &&
@@ -275,7 +281,7 @@ export async function classifyWins(
       if (confidence === "high") confidence = "medium";
     }
 
-    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard, importerSrc);
+    const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard, importerSrc, localPipe ? importedSrc : null);
     if (movesToPreloaded) {
       edit.summary += ` (moves ${kb(total)} KB from first-load to preloaded; real saving only if the component is conditional)`;
       edit.steps.push("This only moves bytes from first-load to preloaded: the dynamic chunk is still preloaded on server render. Real transfer savings need the component to render conditionally (tab, modal, below-the-fold); otherwise the gain is parse/hydrate time.");
@@ -325,6 +331,7 @@ function buildEdit(
   replacement: string | undefined,
   guard: GuardCandidate | null = null,
   importerSrc: string | null = null,
+  localPipeSrc: string | null = null,
 ): WinEdit {
   const target = edge.packageName ?? edge.imported;
   const verify = `pnpm exec wimb wins --cwd ${JSON.stringify(ctx.projectRoot)} --compare .wimb/wins.json  # rebuild + compare routes: ${routes.join(", ")}`;
@@ -369,6 +376,17 @@ function buildEdit(
         verify,
       };
     case "guard-heavy": {
+      if (localPipeSrc) {
+        const lp = findUnifiedPipeline(edge.imported, localPipeSrc);
+        const e = lp ? buildMarkdownPipelineEdit(lp, edge.imported) : null;
+        return {
+          summary: e?.summary ?? `Guard the markdown pipeline in ${edge.imported} behind a cheap pre-check`,
+          originalImport: original,
+          replacementImport: e?.replacementImport,
+          steps: e?.steps ?? [`Add a cheap pre-check before the unified pipeline in ${edge.imported} and import it on demand.`],
+          verify,
+        };
+      }
       const pipe = guard && importerSrc && edge.packageName ? findUnifiedPipeline(file, importerSrc) : null;
       const inPipe = !!pipe && pipe.imports.some((x) => x.spec === edge.packageName || x.spec.startsWith(`${edge.packageName}/`));
       const g = inPipe ? buildMarkdownPipelineEdit(pipe!, file) : guard && edge.packageName ? buildGuardEdit(edge.packageName, guard, file) : null;

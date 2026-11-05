@@ -239,9 +239,17 @@ export function detectStubWins(graph: ParsedGraph, opts: StubOptions): Win[] {
       // Barrel check: every entry must be a re-export; if the app names an export that re-exports P, it's genuinely used.
       let certain = !broad;
       let blocked = true;
+      let indirect = false;
       for (const [u, v] of broad ? [] : entries) {
-        const re = reexportOf(readText(join(projectRoot, rg.paths[u])) ?? "", rg.paths[u], rg.paths[v], P);
-        if (re.kind === "none") { blocked = false; break; }
+        const barrelSrc = readText(join(projectRoot, rg.paths[u])) ?? "";
+        const re = reexportOf(barrelSrc, rg.paths[u], rg.paths[v], P);
+        if (re.kind === "none") {
+          // Not a re-export: a "sideEffects": false package that imports P and uses it inside one of its functions
+          // is still kept whole because P itself has side effects. We can't see which export needs P, so flag it low.
+          if (barrelSrc.includes(P)) { indirect = true; certain = false; continue; }
+          blocked = false;
+          break;
+        }
         if (re.kind === "star") { certain = false; continue; }
         const chain = chainFrom(rg, rg.parent, u);
         const a = pkgOf[u]!;
@@ -258,7 +266,7 @@ export function detectStubWins(graph: ParsedGraph, opts: StubOptions): Win[] {
       if (lost < minBytes) continue;
       const [u0, v0] = (broad ? [...appEntries, ...entries] : entries)[0];
       const info = stubInfo(P, via, [...sig.strong, ...sig.weak]);
-      const confidence: Confidence = broad ? "medium" : certain && sig.strong.length > 0 ? "high" : sig.strong.length > 0 ? "medium" : "low";
+      const confidence: Confidence = indirect ? "low" : broad ? "medium" : certain && sig.strong.length > 0 ? "high" : sig.strong.length > 0 ? "medium" : "low";
       cands.push({
         pkg: P,
         entries,

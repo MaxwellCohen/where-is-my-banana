@@ -133,12 +133,42 @@ function classifyRef(ref: Ref): UsageKind {
     const n = chain[i]!;
     const child = chain[i + 1]!;
     if (isHandlerAttr(n)) return "event-handler-only";
-    if (n.type === "ConditionalExpression" && n.test !== child) return "conditional-render";
-    if (n.type === "LogicalExpression" && n.right === child) return "conditional-render";
-    if (n.type === "IfStatement" && n.test !== child) return "conditional-render";
-    if (n.type === "SwitchCase" && n.test !== child) return "conditional-render";
+    if (isLazyGuard(n, child)) return "conditional-render";
   }
   return "always-rendered";
+}
+
+/**
+ * Does `n` gate `child` behind a condition that is false on first render? The else side always counts as lazy;
+ * the then side only when the test can't already hold at first paint (see initiallyTrue).
+ */
+function isLazyGuard(n: AstNode, child: AstNode): boolean {
+  if (n.type === "SwitchCase") return n.test !== child;
+  if (n.type === "LogicalExpression") {
+    if (n.right !== child) return false;
+    return n.operator !== "&&" || !initiallyTrue(n.left, false);
+  }
+  if ((n.type === "ConditionalExpression" || n.type === "IfStatement") && n.test !== child) {
+    return n.consequent !== child || !initiallyTrue(n.test, false);
+  }
+  return false;
+}
+
+/**
+ * Can this guard already be true on first render? The signal is a negated operand inside `||`/`??`
+ * (e.g. `mode === "x" || !open`). `&&` needs every side and resets `inOr`, so `!a && !b` behaves the same
+ * wherever it sits. Comparisons, bare identifiers, `!!x` and a lone `!x` are reliable guards.
+ */
+function initiallyTrue(t: AstNode | undefined, inOr: boolean): boolean {
+  if (!t) return false;
+  if (t.type === "ParenthesizedExpression" || t.type === "TSAsExpression" || t.type === "TSNonNullExpression" || t.type === "TSSatisfiesExpression") {
+    return initiallyTrue(t.expression, inOr);
+  }
+  if (t.type === "LogicalExpression") {
+    if (t.operator === "&&") return initiallyTrue(t.left, false) && initiallyTrue(t.right, false);
+    return initiallyTrue(t.left, true) || initiallyTrue(t.right, true);
+  }
+  return t.type === "UnaryExpression" && t.operator === "!" && inOr && t.argument?.type !== "UnaryExpression";
 }
 
 function jsxName(n: AstNode | undefined): string {

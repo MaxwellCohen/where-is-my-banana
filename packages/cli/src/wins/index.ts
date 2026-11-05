@@ -79,7 +79,7 @@ export async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
 export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {
   const graph = await loadGraph(opts);
   opts.onGraph?.(graph);
-  const attributions = attributeRoutes(graph, { minBytes: opts.minBytes });
+  const attributions = attributeRoutes(graph, { minBytes: opts.minBytes, projectRoot: opts.projectRoot });
   if (attributions.length === 0) throw new Error(NO_ATTRIBUTION_MESSAGE);
   const wins = await classifyWins(attributions, { projectRoot: opts.projectRoot, byteSource: "measured", framework: detectFramework(opts.projectRoot) });
   wins.push(...detectStubWins(graph, { projectRoot: opts.projectRoot, minBytes: opts.minBytes }));

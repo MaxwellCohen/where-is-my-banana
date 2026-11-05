@@ -33,6 +33,22 @@ const attr = (
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "wins-classify-"));
+  write(
+    "lib/renderMd.tsx",
+    `import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
+import rehypeStringify from "rehype-stringify";
+export function renderInlineMarkdownText(text: string) {
+  return String(unified().use(remarkParse).use(remarkRehype).use(rehypeStringify).processSync(text));
+}`,
+  );
+  write(
+    "components/Faq.tsx",
+    `"use client";
+import { renderInlineMarkdownText } from "../lib/renderMd";
+export default function Faq({ t }: { t: string }) { return <div dangerouslySetInnerHTML={{ __html: renderInlineMarkdownText(t) }} />; }`,
+  );
   write("components/Chart.tsx", `export default function Chart(){ return <div/>; }`);
   write("components/Named.tsx", `export function Named(){ return <div/>; }`);
   write("components/Static.tsx", `export default function Static(){ return <p>hi</p>; }`);
@@ -89,6 +105,13 @@ describe("classifyWins", () => {
     expect(w!.safety).toBe("safe");
     expect(w!.edit.replacementImport).not.toContain("ssr: false");
     expect(w!.usageLoc).toBeDefined();
+  });
+
+  it("first-party edge into a module hosting a unified pipeline -> guard-heavy", async () => {
+    const [w] = await run([attr("/faq", "components/Faq.tsx", "lib/renderMd.tsx", 100000)]);
+    expect(w!.fixKind).toBe("guard-heavy");
+    expect(w!.edit.replacementImport).toContain("MARKDOWN_HINT");
+    expect(w!.edit.summary).toContain("lib/renderMd.tsx");
   });
 
   it("handler-only -> await import", async () => {
