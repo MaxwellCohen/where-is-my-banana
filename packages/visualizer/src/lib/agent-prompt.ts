@@ -1,7 +1,7 @@
 /** Agent prompt that captures a Next.js analyze graph and loads it into this visualizer. */
 export function buildAgentPrompt(visualizerUrl: string): string {
   const url = visualizerUrl.replace(/\/$/, "");
-  return `Make this website faster (Next.js 16+ or Vite). Do not upgrade \`next\`, never add \`ssr: false\`, and ask before removing any third-party script.
+  return `Cut this site's first-load client JS and fix its top performance issues. Every change must be backed by a measurement. Scope: Next.js 16+ or Vite.
 
 1. From the project root (Node >= 20), run the one-command speed audit. It runs the static audit, the bundle ranking and (with \`--url <site>\`) a live-page audit, then writes a ranked plan to \`.wimb/plan.md\` (add \`.wimb/\` to .gitignore):
 
