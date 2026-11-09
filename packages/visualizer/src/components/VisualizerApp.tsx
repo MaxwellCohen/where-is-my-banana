@@ -457,6 +457,19 @@ export function VisualizerApp() {
           </main>
         </div>
       )}
+
+      <footer className="footer">
+        <span>
+          Where Is My Banana — see what your routes really pull in.
+        </span>
+        <a
+          href="https://github.com/MaxwellCohen/where-is-my-banana"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub repo ↗
+        </a>
+      </footer>
     </div>
   );
 }
