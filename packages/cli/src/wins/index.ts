@@ -5,6 +5,7 @@ import { parseGraphV1File } from "@wimb/graph-v1/parse-file";
 import { parseNextConfig } from "../config.js";
 import { hasAnalyzeArtifacts, resolveAnalyzeDirs, projectSupportsAnalyzeExport, resolveDistDir } from "../build/analyze.js";
 import { buildGraphFromBinary } from "./binary-graph.js";
+import { rebaseGraph } from "./rebase.js";
 import { buildGraphFromVite, isViteProject } from "../sources/vite.js";
 import { nextHasAnalyze, runNext } from "./next-cli.js";
 import { attributeRoutes } from "./attribute.js";
@@ -52,7 +53,7 @@ export async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
     if (!existsSync(opts.analyzeExportPath)) {
       throw new Error(`analyze export not found at ${opts.analyzeExportPath}`);
     }
-    return parseGraphV1File(opts.analyzeExportPath);
+    return rebaseGraph(parseGraphV1File(opts.analyzeExportPath), opts.projectRoot);
   }
   if (opts.vite ?? isViteProject(opts.projectRoot)) return buildGraphFromVite(opts.projectRoot);
   const distDir = resolveDistDir(opts.projectRoot, (await parseNextConfig(opts.projectRoot))?.distDir, opts.distDir);
@@ -73,7 +74,7 @@ export async function loadGraph(opts: RunWinsOptions): Promise<ParsedGraph> {
     }
     throw new Error(`No measured analyze data found: ${reasons.join("; ")}. ${NO_DATA_HINT}`);
   }
-  return parseGraphV1Jsonl(await exportJsonl(opts.projectRoot, distDir, opts.snapshot));
+  return rebaseGraph(parseGraphV1Jsonl(await exportJsonl(opts.projectRoot, distDir, opts.snapshot)), opts.projectRoot);
 }
 
 export async function runWins(opts: RunWinsOptions): Promise<WinsReport> {

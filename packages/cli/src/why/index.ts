@@ -1,6 +1,6 @@
 import { packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
-import { buildRouteGraph, chainFrom, lostBytes, parentsWithout, reachableBytes, type RouteGraph } from "../wins/reach.js";
+import { buildRouteGraph, chainFrom, importGroupSkip, lostBytes, parentsWithout, reachableBytes, type RouteGraph } from "../wins/reach.js";
 
 export interface WhyCut {
   importer: string;
@@ -150,7 +150,7 @@ function analyzeRoute(rg: RouteGraph, matchedKeys: Set<string>, maxChains: numbe
 }
 
 function cutFor(rg: RouteGraph, u: number, v: number, targets: Set<number>): WhyCut {
-  const without = parentsWithout(rg, (a, b) => a === u && b === v);
+  const without = parentsWithout(rg, importGroupSkip(rg, u, v));
   const saved = lostBytes(rg, without);
   let still: string[] | null = null;
   for (const t of targets) {

@@ -1,4 +1,4 @@
-import { normalizeModulePath } from "@wimb/graph-v1";
+import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 
 /** Per-route static (sync) import graph with a virtual root (node 0) pointing at the route's seeds. */
@@ -203,6 +203,32 @@ function bfsParents(succ: number[][], n: number, skip?: (u: number, v: number) =
     }
   }
   return parent;
+}
+
+const pkgCache = new WeakMap<RouteGraph, Array<string | null>>();
+
+/** Package name per node (null for app code). */
+export function nodePackages(rg: RouteGraph): Array<string | null> {
+  let p = pkgCache.get(rg);
+  if (!p) {
+    p = rg.paths.map((x) => packageNameFromPath(x));
+    pkgCache.set(rg, p);
+  }
+  return p;
+}
+
+/**
+ * The edges one source edit removes along with u->v. A single import statement can become several graph edges
+ * (one per used export, one per bundler layer, plus the package's side-effect module), so the cut is every edge
+ * from u's file into v's package, or into v's file when v is app code or in u's own package.
+ */
+export function importGroupSkip(rg: RouteGraph, u: number, v: number): (a: number, b: number) => boolean {
+  const pkgs = nodePackages(rg);
+  const { paths } = rg;
+  const from = paths[u];
+  const to = paths[v];
+  const pkg = pkgs[v] !== pkgs[u] ? pkgs[v] : null;
+  return pkg ? (a, b) => pkgs[b] === pkg && paths[a] === from : (a, b) => paths[b] === to && paths[a] === from;
 }
 
 /** BFS parents with some edges removed (-1 = unreachable without them). */

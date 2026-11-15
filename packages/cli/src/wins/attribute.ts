@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isAppSourcePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import type { EdgeCut, RouteAttribution } from "./types.js";
-import { buildRouteGraph, chainFrom, lostBytes, parentsWithout } from "./reach.js";
+import { buildRouteGraph, chainFrom, importGroupSkip, lostBytes, nodePackages, parentsWithout } from "./reach.js";
 
 export interface AttributeOptions {
   /** Drop edges whose uniqueBytes is below this (default 2048). */
@@ -52,20 +52,10 @@ const DYNAMIC_RUNTIME_RE = /next\/dist\/(?:esm\/)?(?:shared\/lib\/(?:lazy-dynami
 const EXACT_CHECK_LIMIT = 200;
 const MAX_ALSO_CHAINS = 3;
 
-function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, projectRoot?: string): RouteAttribution {
-  const rg = buildRouteGraph(graph, route);
-  if (!rg) return { route, firstLoadBytes: 0, measured: false, edges: [] };
-  const { succ, preds, paths, bytes, parent } = rg;
-  const n = rg.idents.length;
-  const result: RouteAttribution = {
-    route,
-    firstLoadBytes: rg.firstLoadBytes,
-    measured: true,
-    edges: [],
-    hasDynamicRuntime: paths.some((p) => DYNAMIC_RUNTIME_RE.test(p)),
-  };
-
-  // Iterative DFS postorder, then Cooper-Harvey-Kennedy dominators.
+/** Cooper-Harvey-Kennedy dominators from node 0, plus the bytes of each node's dominated subtree. */
+function dominatorBytes(succ: number[][], preds: number[][], bytes: number[]): { idom: number[]; domBytes: number[] } {
+  const n = succ.length;
+  // Iterative DFS postorder.
   const post = new Array<number>(n).fill(-1);
   const order: number[] = [];
   const visited = new Array<boolean>(n).fill(false);
@@ -113,6 +103,23 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, pro
   // Dominated-subtree bytes: fold in postorder (children of the dom tree finish before idom).
   const domBytes = bytes.slice();
   for (const v of order) if (v !== 0) domBytes[idom[v]] += domBytes[v];
+  return { idom, domBytes };
+}
+
+function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, projectRoot?: string): RouteAttribution {
+  const rg = buildRouteGraph(graph, route);
+  if (!rg) return { route, firstLoadBytes: 0, measured: false, edges: [] };
+  const { succ, preds, paths, bytes, parent } = rg;
+  const n = rg.idents.length;
+  const result: RouteAttribution = {
+    route,
+    firstLoadBytes: rg.firstLoadBytes,
+    measured: true,
+    edges: [],
+    hasDynamicRuntime: paths.some((p) => DYNAMIC_RUNTIME_RE.test(p)),
+  };
+
+  const { idom, domBytes } = dominatorBytes(succ, preds, bytes);
 
   const reach = new Map<number, number>();
   const subtreeBytes = (v: number): number => {
@@ -182,6 +189,74 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, pro
     if (also.length) cut.alsoReachableVia = also;
     if (exact < cut.uniqueBytes) cut.uniqueBytes = exact;
   });
+  // One import statement can become several graph edges: one per used export, one per bundler layer, plus the
+  // package's side-effect module. Cut one at a time they save nothing, because the siblings keep the target alive.
+  // So also score every edge from an app file into one package (or one file) as a single cut: route each such
+  // group through a virtual node, read its dominated bytes, then re-check the best ones exactly.
+  const pkgs = nodePackages(rg);
+  const groups = new Map<string, { from: number[]; to: number[] }>();
+  for (let u = 1; u < n; u++) {
+    if (parent[u] === -1 || !isAppSourcePath(paths[u])) continue;
+    for (const v of succ[u]) {
+      if (paths[v] === paths[u] || (pkgs[v] && FRAMEWORK_PKGS.has(pkgs[v]!))) continue;
+      const key = `${paths[u]}\0${pkgs[v] ?? paths[v]}`;
+      let g = groups.get(key);
+      if (!g) groups.set(key, (g = { from: [], to: [] }));
+      if (!g.from.includes(u)) g.from.push(u);
+      if (!g.to.includes(v)) g.to.push(v);
+    }
+  }
+  const multi = [...groups.values()].filter((g) => g.from.length > 1 || g.to.length > 1);
+  if (multi.length) {
+    const gsucc = succ.map((s) => s.slice());
+    for (const g of multi) {
+      const to = new Set(g.to);
+      for (const u of g.from) gsucc[u] = [...gsucc[u].filter((v) => !to.has(v)), gsucc.length];
+      gsucc.push(g.to.slice());
+    }
+    const gpreds: number[][] = gsucc.map(() => []);
+    gsucc.forEach((s, a) => {
+      for (const b of s) gpreds[b].push(a);
+    });
+    const gdom = dominatorBytes(gsucc, gpreds, [...bytes, ...multi.map(() => 0)]).domBytes;
+    const depth = (i: number) => paths[i].split("/").length;
+    multi
+      .map((g, i) => ({ g, bound: gdom[n + i] }))
+      .filter((x) => x.bound >= minBytes)
+      .sort((a, b) => b.bound - a.bound)
+      .slice(0, EXACT_CHECK_LIMIT)
+      .forEach(({ g }) => {
+        const u = g.from[0];
+        // Name the cut after the package's shallowest module (its entry), the same on every route.
+        const v = g.to.reduce((best, t) => (depth(t) < depth(best) || (depth(t) === depth(best) && paths[t] < paths[best]) ? t : best));
+        const skip = importGroupSkip(rg, u, v);
+        const without = parentsWithout(rg, skip);
+        const exact = lostBytes(rg, without);
+        const members = cands.filter((c) => skip(c.u, c.v));
+        if (exact < minBytes || exact <= members.reduce((sum, c) => sum + c.cut.uniqueBytes, 0)) return;
+        for (const m of members) cands.splice(cands.indexOf(m), 1);
+        const also: string[][] = [];
+        for (let i = 1; i < n && also.length < MAX_ALSO_CHAINS; i++) {
+          if (paths[i] !== paths[v] || without[i] === -1) continue;
+          for (const p of preds[i]) {
+            if (p === 0 || skip(p, i) || without[p] === -1) continue;
+            also.push([...chainFrom(rg, without, p), paths[i]]);
+            if (also.length >= MAX_ALSO_CHAINS) break;
+          }
+        }
+        cands.push({
+          u,
+          v,
+          cut: {
+            edge: { importer: paths[u], imported: paths[v], packageName: pkgs[v] },
+            chain: [...chainTo(u), paths[v]],
+            uniqueBytes: exact,
+            subtreeBytes: subtreeBytes(v),
+            ...(also.length ? { alsoReachableVia: also } : {}),
+          },
+        });
+      });
+  }
   // Turbopack collapses re-exports inside side-effect-free packages, so an injected entry that imports `@sentry/nextjs`
   // may show no edge to `@sentry/replay` even though the former bundles the latter. If the cut target's package is a
   // declared dependency (transitively, among packages in this route graph) of a package an injected entry reaches,
