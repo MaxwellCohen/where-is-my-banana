@@ -87,7 +87,7 @@ describe("cms-site fixture autofix", () => {
   it("fixes safely, reports consent, and is idempotent", () => {
     const root = mkdtempSync(join(tmpdir(), "wimb-cms-"));
     cpSync(FIXTURE, root, { recursive: true });
-    const first = applyFixes(root, collectFindings({ projectRoot: root }).findings);
+    const first = applyFixes(root, collectFindings({ projectRoot: root }).findings, { force: true });
     const layout = readFileSync(join(root, "app/layout.tsx"), "utf-8");
     expect(layout).toContain('strategy="lazyOnload"'); // gtm + chat
     expect(layout).toMatch(/cookielaw[^>]*strategy="beforeInteractive"/); // consent untouched

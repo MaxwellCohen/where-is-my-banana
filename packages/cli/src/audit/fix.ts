@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Finding } from "./types.js";
-import { matches } from "./util.js";
+import { inDynamicCall, jsxTags, matches } from "./util.js";
 
 export interface FixChange {
   file: string;
@@ -42,8 +42,7 @@ const bySuffix = (findings: Finding[], ids: string[]) => findings.filter((f) => 
 
 /** Opening `<Name ...>` tags (including their full text) that start on `line`. */
 function tagsOnLine(content: string, name: string, line: number) {
-  const re = new RegExp(`<${name}\\b((?:[^>]|=>)*)>`, "g");
-  return [...matches(content, re)].filter((t) => t.line === line);
+  return [...jsxTags(content, name)].filter((t) => t.line === line);
 }
 
 function scriptBody(content: string, tagEnd: number, selfClosing: boolean): string {
@@ -112,13 +111,12 @@ function fixSsrFalse(file: string, c: string, findings: Finding[], reps: Replace
   for (const fd of findings.filter((f) => f.check === "ssr-false-misuse")) {
     if (done.has(fd.line)) continue;
     done.add(fd.line);
-    const lineStart = c.split("\n").slice(0, fd.line - 1).reduce((n, l) => n + l.length + 1, 0);
-    const tok = c.slice(lineStart).match(/\bssr\s*:\s*false\b/);
-    if (!tok || tok.index === undefined) {
+    const tok = [...matches(c, /\bssr\s*:\s*false\b/)].find((t) => t.line === fd.line && inDynamicCall(c, t.m.index))?.m;
+    if (!tok) {
       skipped.push({ file, line: fd.line, reason: "could not locate `ssr: false`" });
       continue;
     }
-    const at = lineStart + tok.index;
+    const at = tok.index;
     // Widen to the surrounding option object so we can drop an object that becomes empty.
     const before = c.slice(0, at);
     const after = c.slice(at + tok[0].length);
@@ -190,7 +188,7 @@ function fixRawImg(file: string, c: string, findings: Finding[], reps: Replaceme
   if (!fds.length) return;
   if (ABOVE_FOLD_PATH.test(file)) return void skipped.push({ file, reason: "above-the-fold file (hero/header/nav/logo): <img> left alone" });
   const lines = new Set(fds.map((f) => f.line));
-  for (const { m, line } of matches(c, /<img\b((?:[^>]|=>)*)>/)) {
+  for (const { m, line } of jsxTags(c, "img")) {
     if (!lines.has(line)) continue;
     const attrs = m[1];
     if (/\{\s*\.\.\./.test(attrs)) {
@@ -248,8 +246,8 @@ export function computeFixes(files: { path: string; content: string }[], finding
 /** Paths (posix, relative to `root`) with unstaged/untracked changes, or null when `root` is not in a git repo. */
 export function dirtyFiles(root: string): Set<string> | null {
   try {
-    const top = execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const out = execFileSync("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+    const top = realpathSync(execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+    const out = execFileSync("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
     const rootAbs = realpathSync(resolve(root));
     const dirty = new Set<string>();
     const parts = out.split("\0");
@@ -262,7 +260,8 @@ export function dirtyFiles(root: string): Set<string> | null {
       if (x === "R" || x === "C") i++; // skip the rename source
       if (y === " ") continue; // fully staged: nothing unstaged to lose
       const abs = resolve(top, path);
-      if (abs.startsWith(rootAbs + "/")) dirty.add(abs.slice(rootAbs.length + 1));
+      const rel = relative(rootAbs, abs);
+      if (rel && rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel)) dirty.add(rel.split(sep).join("/"));
     }
     return dirty;
   } catch {
@@ -293,7 +292,12 @@ export function applyFixes(root: string, findings: Finding[], opts: ApplyOptions
   }
   const res = computeFixes(files, findings);
   const dirty = opts.force ? null : dirtyFiles(root);
-  if (dirty && dirty.size) {
+  if (!opts.force && !opts.dryRun && !dirty && res.edits.length) {
+    // Fail closed: without a git status we cannot tell whether edits would clobber uncommitted work.
+    for (const e of res.edits) res.skipped.push({ file: e.file, reason: "cannot check for unstaged changes (not a git repository or git failed); pass --force to write anyway" });
+    res.edits = [];
+    res.changes = [];
+  } else if (dirty && dirty.size) {
     const blocked = new Set(res.edits.filter((e) => dirty.has(e.file)).map((e) => e.file));
     for (const b of blocked) res.skipped.push({ file: b, reason: "has unstaged changes (commit/stash them or pass --force)" });
     res.edits = res.edits.filter((e) => !blocked.has(e.file));

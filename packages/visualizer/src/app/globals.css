@@ -428,6 +428,11 @@ code {
   line-height: 1.45;
 }
 
+.link-notice {
+  margin: 0.75rem 0 0;
+  color: var(--warn);
+}
+
 .importer-cols {
   display: grid;
   grid-template-columns: minmax(12rem, 1fr) 5.5rem 5.5rem 4rem;

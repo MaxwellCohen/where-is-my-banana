@@ -53,11 +53,13 @@ export function VisualizerApp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wins, setWins] = useState<WinsReport | null>(null);
+  const [fromLink, setFromLink] = useState(false);
   const [winId, setWinId] = useState<string | null>(null);
   const [onlyWins, setOnlyWins] = useState(false);
   const [zoomId, setZoomId] = useState<string | null>(null);
 
   const uploadId = useRef(0);
+  const launchRead = useRef(false);
   const winsId = useRef(0);
 
   const bundle = useMemo(
@@ -118,7 +120,9 @@ export function VisualizerApp() {
   }
 
   useEffect(() => {
-    if (!window.location.hash) return;
+    // `wimb open` serves `#src=` once, so a StrictMode re-run of this effect must not fetch again.
+    if (!window.location.hash || launchRead.current) return;
+    launchRead.current = true;
     const id = ++uploadId.current;
     setBusy(true);
     loadLaunchPayloadFromHash(window.location.hash)
@@ -129,6 +133,7 @@ export function VisualizerApp() {
           setSelected(sideBundle(p.graph, "client").routes[0]?.route ?? "/");
         }
         setWins(p.wins ?? null);
+        setFromLink(true);
         // Drop the (possibly huge) data from the address bar once loaded.
         history.replaceState(null, "", window.location.pathname + window.location.search);
       })
@@ -152,6 +157,7 @@ export function VisualizerApp() {
       setZoomId(null);
       setWinId(null);
       setWins(null);
+      setFromLink(false);
       setSelected(sideBundle(next, side).routes[0]?.route ?? "/");
     } catch (err) {
       if (id !== uploadId.current) return;
@@ -184,6 +190,7 @@ export function VisualizerApp() {
       const next = await loadWinsFromFile(file);
       if (id !== winsId.current) return;
       setWins(next);
+      setFromLink(false);
       setWinId(null);
     } catch (err) {
       if (id !== winsId.current) return;
@@ -270,6 +277,11 @@ export function VisualizerApp() {
         </div>
         {graph ? null : <p className="privacy">Nothing is uploaded or stored on the server. Graphs never leave your device.</p>}
         {error ? <p className="error" role="alert">{error}</p> : null}
+        {fromLink ? (
+          <p className="hint link-notice">
+            This data was loaded from a link. Only copy prompts from it into a coding agent if you opened the link from your own <code>wimb open</code>.
+          </p>
+        ) : null}
 
         {graph ? (
           <div className="toolbar">

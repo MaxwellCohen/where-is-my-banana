@@ -6,7 +6,7 @@ import { buildDualRouteForest } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import { writeVizGraph, writeVizFile } from "./viz.js";
 import { existsSync, readFileSync } from "node:fs";
-import { FlagError, parseAuditChecks, parseExitThreshold, parseFailOn, parseFormats, parseNumberFlag, parseTop, validateWinsReport } from "./index-flags.js";
+import { FlagError, collectFlag, parseAuditChecks, parseExitThreshold, parseFailOn, parseFormats, parseNumberFlag, parseTop, validateWinsReport } from "./index-flags.js";
 import { collectFindings, runAudit } from "./audit/index.js";
 import { formatAuditTerminal, writeAudit } from "./audit/output.js";
 import { applyFixes, formatFixSummary } from "./audit/fix.js";
@@ -68,10 +68,11 @@ const scanCommand = defineCommand({
       description: "Omit AST and JSX trees from forest.json entries",
       default: false,
     },
-    "no-ast": {
+    ast: {
       type: "boolean",
-      description: "Alias for --forest-compact",
-      default: false,
+      description: "Include AST and JSX trees in forest.json",
+      negativeDescription: "Alias for --forest-compact",
+      default: true,
     },
   },
   async run({ args }) {
@@ -94,7 +95,7 @@ const scanCommand = defineCommand({
         : undefined,
       formats,
       exitThreshold,
-      forestCompact: args["forest-compact"] || args["no-ast"],
+      forestCompact: args["forest-compact"] || args.ast === false,
     });
     process.stdout.write("", () => process.exit(code));
   },
@@ -303,7 +304,7 @@ const verifyCommand = defineCommand({
     accept: { type: "boolean", description: "On success, rotate the baseline (wins.json -> wins.prev.json)", default: false },
     json: { type: "boolean", description: "Print the verdict as JSON", default: false },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const projectRoot = resolve(args.cwd);
     let exitCode = 0;
     try {
@@ -348,7 +349,7 @@ const verifyCommand = defineCommand({
         if (v.status === "failed") {
           exitCode = 1;
           if (args.revert) {
-            const files = [...winFiles(win), ...listFlag(args.files)];
+            const files = [...winFiles(win), ...listFlag(collectFlag(rawArgs, "files"))];
             if (files.length === 0) console.error("wimb verify: --revert needs --win <id> or --files <path>; nothing reverted");
             else {
               const plan = planRevert(projectRoot, files, args["force-revert"]);
@@ -525,20 +526,20 @@ const openCommand = defineCommand({
   args: {
     cwd: { type: "string", description: "Project root", default: process.cwd() },
     url: { type: "string", description: "Visualizer base URL", default: DEFAULT_VISUALIZER_URL },
-    "no-launch": { type: "boolean", description: "Print the URL instead of opening a browser", default: false },
+    launch: { type: "boolean", description: "Open a browser", negativeDescription: "Print the URL instead of opening a browser", default: true },
   },
   async run({ args }) {
     try {
       const gz = buildPayload(resolve(args.cwd));
       const inline = inlineUrl(args.url, gz);
       if (inline) {
-        console.log(inline.length > 2000 ? `wimb: opening visualizer (${(inline.length / 1024).toFixed(0)} KB link)` : `wimb: ${inline}`);
-        if (!args["no-launch"]) launchBrowser(inline);
+        console.log(args.launch !== false && inline.length > 2000 ? `wimb: opening visualizer (${(inline.length / 1024).toFixed(0)} KB link)` : `wimb: ${inline}`);
+        if (args.launch !== false) launchBrowser(inline);
         return;
       }
       await serveOnce(gz, args.url, (url) => {
         console.log(`wimb: serving data on localhost until the page loads it (2 min max)\nwimb: ${url}`);
-        if (!args["no-launch"]) launchBrowser(url);
+        if (args.launch !== false) launchBrowser(url);
       });
     } catch (err) {
       fail(err);
@@ -564,11 +565,11 @@ const speedCommand = defineCommand({
     snapshot: { type: "boolean", description: "Copy plan.json to plan.prev.json after the run", default: false },
     "fail-on": { type: "string", description: "Exit 1 if any plan item at or above this severity (high|medium)" },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const projectRoot = resolve(args.cwd);
     let opts;
     try {
-      const rawUrls = [...(Array.isArray(args.url) ? args.url : [args.url])];
+      const rawUrls = collectFlag(rawArgs, "url");
       opts = {
         projectRoot,
         urls: parseUrlFlag(rawUrls),
@@ -619,11 +620,10 @@ const liveCommand = defineCommand({
     lighthouse: { type: "boolean", description: "Run Lighthouse via npx --no-install (first 3 pages)", default: false },
     "lighthouse-json": { type: "string", description: "Import existing Lighthouse JSON report(s); extra .json args are also imported" },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     try {
       const pos = ((args as any)._ as string[] | undefined) ?? [];
-      const lhArg = args["lighthouse-json"] as unknown;
-      const lhJson = ([] as string[]).concat((lhArg as string | string[] | undefined) ?? [], pos.filter((x) => /\.json$/i.test(x)));
+      const lhJson = ([] as string[]).concat(collectFlag(rawArgs, "lighthouse-json"), pos.filter((x) => /\.json$/i.test(x)));
       const urls = pos.filter((x) => !/\.json$/i.test(x));
       const failOn = parseFailOn(args["fail-on"]);
       const int = (n: string, v: string | undefined, d: number) => {

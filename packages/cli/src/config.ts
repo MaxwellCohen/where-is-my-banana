@@ -48,13 +48,22 @@ function dedupe(items: string[]): string[] {
   return [...new Set(items)];
 }
 
+const CONFIG_NAMES = ["wimb.config.ts", "wimb.config.mts", "wimb.config.js", "wimb.config.mjs", "wimb.config.cjs"];
+
+async function loadWithJiti(path: string): Promise<unknown> {
+  const { createJiti } = await import("jiti");
+  const jiti = createJiti(import.meta.url, { interopDefault: true });
+  return jiti.import(path);
+}
+
 export async function loadConfig(projectRoot: string): Promise<WimbConfig> {
-  const configPath = join(projectRoot, "wimb.config.ts");
-  if (!existsSync(configPath)) return DEFAULT_CONFIG;
+  const name = CONFIG_NAMES.find((n) => existsSync(join(projectRoot, n)));
+  if (!name) return DEFAULT_CONFIG;
   try {
-    const mod = await import(configPath);
-    return mergeConfig(DEFAULT_CONFIG, mod.default ?? {});
-  } catch {
+    const mod = (await loadWithJiti(join(projectRoot, name))) as { default?: Partial<WimbConfig> } & Partial<WimbConfig>;
+    return mergeConfig(DEFAULT_CONFIG, mod?.default ?? mod ?? {});
+  } catch (err) {
+    console.error(`wimb: could not load ${name}: ${err instanceof Error ? err.message : String(err)}; using defaults`);
     return DEFAULT_CONFIG;
   }
 }

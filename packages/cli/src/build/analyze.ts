@@ -210,7 +210,7 @@ function exportAnalyzeGraph(
 function nextCommand(projectRoot: string, args: string[]): { command: string; args: string[] } {
   const local = join(projectRoot, "node_modules", ".bin", "next");
   if (existsSync(local)) return { command: local, args };
-  return { command: "npm", args: ["exec", "--no-install", "--", "next", ...args] };
+  return { command: "npm", args: ["exec", "--no", "--", "next", ...args] };
 }
 
 /**

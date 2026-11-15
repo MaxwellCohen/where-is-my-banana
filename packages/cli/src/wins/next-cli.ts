@@ -34,14 +34,14 @@ function hookCleanup(): void {
   }
 }
 
-/** Run the project's `next` via `npm exec --no-install` (never downloads). Resolves with stdout when `capture` is set. */
+/** Run the project's `next` via `npm exec --no` (never downloads). Resolves with stdout when `capture` is set. */
 export function runNext(projectRoot: string, args: string[], opts: RunNextOptions = {}): Promise<string> {
   hookCleanup();
   const label = `next ${args.slice(0, 2).join(" ")}`;
   const timeoutMs = opts.timeoutMs ?? NEXT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const localNext = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "next.cmd" : "next");
-    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npm", ["exec", "--no-install", "--", "next", ...args]];
+    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npm", ["exec", "--no", "--", "next", ...args]];
     const child = spawn(cmd as string, cmdArgs as string[], {
       shell: process.platform === "win32",
       cwd: projectRoot,

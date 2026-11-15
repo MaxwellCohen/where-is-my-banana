@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { compareWins } from "./compare.js";
 import type { Win, WinsReport } from "./types.js";
 
@@ -104,28 +104,55 @@ const blobOfWorking = (root: string, file: string): string | null => {
 };
 const blobAtHead = (root: string, file: string): string | null => {
   try {
-    return git(root, ["rev-parse", `HEAD:./${file}`]);
+    const hash = git(root, ["rev-parse", `HEAD:./${file}`]);
+    return git(root, ["cat-file", "-t", hash]) === "blob" ? hash : null; // rev-parse also resolves directories (trees)
   } catch {
     return null;
   }
 };
 
-/** Remember each win importer's working-tree hash at baseline time, to detect edits that predate the win. */
+/** Paths (relative to root, posix) with uncommitted or untracked changes right now; null if git fails. */
+function dirtyPaths(root: string): string[] | null {
+  try {
+    const run = (args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf-8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+    const top = realpathSync(run(["rev-parse", "--show-toplevel"]).trim());
+    const realRoot = realpathSync(root);
+    const parts = run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]).split("\0");
+    const out = new Set<string>();
+    const add = (p: string) => {
+      const rel = relative(realRoot, join(top, p));
+      if (rel && !rel.startsWith("..") && !isAbsolute(rel)) out.add(rel.split(sep).join("/"));
+    };
+    for (let i = 0; i < parts.length; i++) {
+      const e = parts[i];
+      if (e.length < 4) continue;
+      add(e.slice(3));
+      if (e[0] === "R" || e[0] === "C" || e[1] === "R" || e[1] === "C") add(parts[++i] ?? ""); // rename/copy: second path follows
+    }
+    return [...out].sort();
+  } catch {
+    return null;
+  }
+}
+
+/** Remember each win importer's working-tree hash and every dirty path at baseline time, to detect edits that predate the win. */
 export function snapshotFileState(root: string, report: WinsReport): void {
   const hashes: Record<string, string> = {};
   for (const f of new Set(report.wins.flatMap((w) => winFiles(w)))) {
     const h = existsSync(join(root, f)) ? blobOfWorking(root, f) : null;
     if (h) hashes[f] = h;
   }
+  const dirty = dirtyPaths(root);
   mkdirSync(dirname(stateFile(root)), { recursive: true });
-  writeFileSync(stateFile(root), `${JSON.stringify({ hashes }, null, 2)}\n`, "utf-8");
+  writeFileSync(stateFile(root), `${JSON.stringify(dirty ? { hashes, dirty } : { hashes }, null, 2)}\n`, "utf-8");
 }
 
-function readState(root: string): Record<string, string> {
+function readState(root: string): { hashes: Record<string, string>; dirty: string[] | null } {
   try {
-    return (JSON.parse(readFileSync(stateFile(root), "utf-8")) as { hashes?: Record<string, string> }).hashes ?? {};
+    const s = JSON.parse(readFileSync(stateFile(root), "utf-8")) as { hashes?: Record<string, string>; dirty?: unknown };
+    return { hashes: s.hashes ?? {}, dirty: Array.isArray(s.dirty) ? s.dirty.map(String) : null };
   } catch {
-    return {};
+    return { hashes: {}, dirty: null };
   }
 }
 
@@ -138,16 +165,35 @@ export interface RevertPlan {
 export function planRevert(root: string, files: string[], force = false): RevertPlan {
   const state = readState(root);
   const plan: RevertPlan = { revert: [], refused: [] };
-  for (const file of new Set(files)) {
-    const head = blobAtHead(root, file);
-    if (!head) {
-      plan.refused.push({ file, why: "not tracked by git (cannot restore)" });
+  const seen = new Set<string>();
+  for (const input of files) {
+    const rel = relative(resolve(root), resolve(root, input)).split(sep).join("/");
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    if (!rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+      plan.refused.push({ file: input, why: "path is outside the project root" });
       continue;
     }
-    const base = state[file];
-    if (base && base !== head && !force) {
-      plan.refused.push({ file, why: "had uncommitted changes before the win was applied; checkout would discard them (rerun with --force-revert to override)" });
+    const file = rel;
+    const head = blobAtHead(root, file);
+    if (!head) {
+      plan.refused.push({ file, why: "not a regular file tracked by git (not tracked, or a directory); cannot restore" });
       continue;
+    }
+    if (!force) {
+      if (!state.dirty) {
+        plan.refused.push({ file, why: "no baseline file-state recorded, so uncommitted work cannot be ruled out; run `wimb verify --init` before editing, or pass --force-revert" });
+        continue;
+      }
+      if (state.dirty.includes(file)) {
+        plan.refused.push({ file, why: "had uncommitted changes before the win was applied; checkout would discard them (rerun with --force-revert to override)" });
+        continue;
+      }
+      const base = state.hashes[file];
+      if (base && base !== head) {
+        plan.refused.push({ file, why: "had uncommitted changes before the win was applied; checkout would discard them (rerun with --force-revert to override)" });
+        continue;
+      }
     }
     if (blobOfWorking(root, file) === head) continue; // already clean
     plan.revert.push(file);

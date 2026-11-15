@@ -1,5 +1,5 @@
 import type { AuditContext, Finding } from "./types.js";
-import { find, importsOf, isAppFile, isClient, isCode, isLayoutLike, isRootLayout, lineAt, matches, resolveImport } from "./util.js";
+import { find, importsOf, isAppFile, isClient, isCode, isLayoutLike, inDynamicCall, isRootLayout, lineAt, matches, resolveImport } from "./util.js";
 
 function bucket(path: string): string {
   const m = path.match(/^(?:.*?\/)?(?:src\/)?app\/(.*)$/);
@@ -50,7 +50,8 @@ export function ssrFalseMisuse(ctx: AuditContext): Finding[] {
     if (!/\bssr\s*:\s*false\b/.test(c)) continue;
     const client = isClient(c);
     const serverFile = !client && /(?:^|\/)(?:src\/)?app\//.test(f.path);
-    const hits = [...matches(c, /\bssr\s*:\s*false\b/)];
+    const hits = [...matches(c, /\bssr\s*:\s*false\b/)].filter(({ m }) => inDynamicCall(c, m.index));
+    if (!hits.length) continue;
     for (const { line, m } of hits) {
       const ctxText = c.slice(Math.max(0, m.index - 300), m.index);
       const target = ctxText.match(/import\(\s*["']([^"']+)["']/g)?.pop() ?? "";

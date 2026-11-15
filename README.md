@@ -10,7 +10,7 @@ Easiest path: open **https://wimb-visualizer.vercel.app/**, copy the prompt, and
 
 ## Manual quick start (run from GitHub)
 
-Needs Node >= 20 and a Next.js App Router app on **Next 16.4+** (Turbopack).
+Needs Node 20.19+ or 22.12+ and a Next.js App Router app on **Next 16.4+** (Turbopack).
 
 ```bash
 cd your-next-app
@@ -59,7 +59,7 @@ node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
 
 ### Maintainers: releasing
 
-Bump `packages/cli/package.json` version on `main`, then push a matching tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The `release` workflow verifies the tag matches the version and is on `main`, runs build, tests and `lint:pkg`, then publishes `@maxwellcohen/wimb` to npm (trusted publishing).
+Bump the version in `packages/cli/package.json` and merge it to `main`. That push starts the `release` workflow (it can also be run manually, from `main` only). It skips versions already on npm, runs build, tests and `lint:pkg`, then, once the `npm` environment's protection rule passes, stages `@maxwellcohen/wimb` on npm (trusted publishing); approve the staged version on npmjs.com with 2FA to publish it. No tag is needed.
 
 ## Sample output
 
@@ -94,7 +94,7 @@ npx @maxwellcohen/wimb verify --win <id> --revert --accept # rebuild, per-route 
 ```
 
 - Fails (exit 1) when any route's first-load rises by more than `--tolerance` (default 200 B), or the win's target routes don't improve. The verdict (`kept|failed|neutral`) is written to `.wimb/verify.json`; later `wins` runs mark failed ids `status: "failed-previously"` and demote them to `needs-review`.
-- `--revert` runs `git checkout --` on only the win's importer file plus any `--files <path>` (repeatable). It refuses untracked files and files that already had uncommitted changes when the baseline was taken (override: `--force-revert`). It never resets or cleans anything else.
+- `--revert` runs `git checkout --` on only the win's importer file plus any `--files <path>` (repeatable). It refuses files that already had uncommitted changes when the baseline was taken, and any file when no baseline state was recorded, so run `verify --init` first (override for both: `--force-revert`). It always refuses untracked files, directories and paths outside `--cwd`. It never resets or cleans anything else.
 - `--accept` (on success) rotates the baseline: `.wimb/wins.json` -> `.wimb/wins.prev.json`. Baseline defaults to `.wimb/wins.prev.json`, falling back to `.wimb/wins.json`.
 - Same graph flags as `wins` (`--cwd`, `--analyze-export`, `--dist-dir`, `--snapshot`, `--vite`, `--no-analyze`).
 
@@ -163,7 +163,7 @@ Flags: `--cwd`, `--json` (print JSON to stdout), `--top N` (per check, default 1
 
 Monorepos: when `pnpm-workspace.yaml` or `package.json` `workspaces` is present, each workspace package that depends on `next` is audited separately and findings carry a `package` label. `ignores.files` accepts real globs (`*`, `**`, `?`, `{a,b}`, `[abc]`, `!negation`; a bare name matches at any depth).
 
-Autofix: `--fix-dry-run` prints a unified diff; `--fix` writes it. Only safe mechanical edits: `strategy="lazyOnload"` on non-consent third-party `<Script>` (consent managers such as OneTrust/Cookiebot are reported, never changed), non-swap font `display` to `swap`, drop `ssr: false` where the audit flags it, add `images.formats` (avif, webp) to a plain `next.config`, `priority` on a hero-named `next/image`, and `loading="lazy" decoding="async"` on raw `<img>` outside hero/header/nav/logo files. Idempotent; ambiguous spots are skipped and listed; files with unstaged git changes are skipped unless `--force`.
+Autofix: `--fix-dry-run` prints a unified diff; `--fix` writes it. Only safe mechanical edits: `strategy="lazyOnload"` on non-consent third-party `<Script>` (consent managers such as OneTrust/Cookiebot are reported, never changed), non-swap font `display` to `swap`, drop `ssr: false` from `next/dynamic` calls the audit flags, add `images.formats` (avif, webp) to a plain `next.config`, `priority` on a hero-named `next/image`, and `loading="lazy" decoding="async"` on raw `<img>` outside hero/header/nav/logo files. Idempotent; ambiguous spots are skipped and listed; files with unstaged git changes are skipped unless `--force`, and outside a git repository `--fix` writes nothing without `--force`.
 
 Baseline: `--save-baseline [--baseline file]` records current findings (default `.wimb/audit-baseline.json`); `--baseline file` then reports and fails (`--fail-on`) only on NEW findings. Fingerprint = rule id + file + message with digits normalized (line numbers ignored); a repeated issue in the same file counts as new beyond the baselined count.
 
@@ -196,13 +196,13 @@ Checks: `html-size`, `headers` (compression, cache, cookies, TTFB), `scripts` (+
 
 ## Security notes
 
-- `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npm exec --no-install`) and never uses a shell on macOS/Linux.
+- `wimb` runs your project's own `next` (or Vite) binary to measure real bundle sizes. It never downloads code (`npm exec --no`) and never uses a shell on macOS/Linux.
 - Releases are published from GitHub Actions with npm provenance, so each version links to the commit that built it.
 - Static analysis tools may flag `child_process` use in `dist/`. That is this build step.
 
 ## Config
 
-`wimb.config.*` supports `thresholds`, `ignores` (`files`, `rules`) and `severityOverrides`.
+`wimb.config.{ts,mts,js,mjs,cjs}` supports `thresholds`, `ignores` (`files`, `rules`) and `severityOverrides`.
 
 ## Note
 

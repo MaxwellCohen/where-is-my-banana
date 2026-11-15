@@ -1,5 +1,5 @@
 import type { AuditContext, Finding } from "./types.js";
-import { find, isCode, JSX_RE, lineAt, matches } from "./util.js";
+import { find, isCode, JSX_RE, jsxTags, lineAt, matches } from "./util.js";
 
 const IMPORTS_NEXT_IMAGE = /from\s*["']next\/image["']|require\(\s*["']next\/image["']/;
 
@@ -30,7 +30,7 @@ export function lcpPriority(ctx: AuditContext): Finding[] {
     const base = f.path.split("/").pop() ?? "";
     if (!/hero|banner|masthead/i.test(base)) continue;
     if (!IMPORTS_NEXT_IMAGE.test(f.content)) continue;
-    const tags = [...matches(f.content, /<Image\b(?:[^>]|=>)*>/)];
+    const tags = [...jsxTags(f.content, "Image")];
     if (tags.length === 0) continue;
     const ok = tags.some(({ m }) => /\bpriority\b|fetchPriority\s*=\s*["']high|loading\s*=\s*["']eager/.test(m[0]));
     if (ok) continue;

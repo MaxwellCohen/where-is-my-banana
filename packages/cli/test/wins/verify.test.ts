@@ -81,6 +81,31 @@ describe("revert", () => {
 
   it("refuses untracked files", () => {
     writeFileSync(join(root, "app/new.tsx"), "x");
-    expect(planRevert(root, ["app/new.tsx"]).refused[0].why).toContain("not tracked");
+    expect(planRevert(root, ["app/new.tsx"]).refused[0].why).toContain("tracked");
+  });
+
+  it("refuses everything without a state file unless forced", () => {
+    rmSync(join(root, ".wimb"), { recursive: true, force: true });
+    writeFileSync(join(root, "app/other.tsx"), "edit\n");
+    const plan = planRevert(root, ["app/other.tsx"]);
+    expect(plan.revert).toEqual([]);
+    expect(plan.refused[0].why).toContain("verify --init");
+    expect(planRevert(root, ["app/other.tsx"], true).revert).toEqual(["app/other.tsx"]);
+  });
+
+  it("refuses --files paths dirty at baseline, reverts clean-at-baseline ones, and force overrides only the dirty rule", () => {
+    git("checkout", "--", ".");
+    writeFileSync(join(root, "app/b.tsx"), "local work\n");
+    snapshotFileState(root, rep({}, []));
+    expect(JSON.parse(readFileSync(join(root, ".wimb/verify-state.json"), "utf-8")).dirty).toContain("app/b.tsx");
+    writeFileSync(join(root, "app/a.tsx"), "win edit\n");
+    const plan = planRevert(root, ["app/a.tsx", "app/b.tsx"]);
+    expect(plan.revert).toEqual(["app/a.tsx"]);
+    expect(plan.refused.map((r) => r.file)).toEqual(["app/b.tsx"]);
+    expect(planRevert(root, ["app/b.tsx"], true).revert).toEqual(["app/b.tsx"]);
+    for (const bad of ["app", "../x", "app/..", join(tmpdir(), "x")]) {
+      expect(planRevert(root, [bad], true).revert).toEqual([]);
+      expect(planRevert(root, [bad]).refused).toHaveLength(1);
+    }
   });
 });
