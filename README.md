@@ -57,6 +57,8 @@ pnpm install && pnpm build
 node packages/cli/dist/index.js wins --cwd /path/to/your-next-app
 ```
 
+Building needs Node 22.18+ (the bundler's minimum). The built CLI runs on the Node versions above.
+
 ### Maintainers: releasing
 
 Bump the version in `packages/cli/package.json` and merge it to `main`. That push starts the `release` workflow (it can also be run manually, from `main` only). It skips versions already on npm, runs build, tests and `lint:pkg`, then, once the `npm` environment's protection rule passes, stages `@maxwellcohen/wimb` on npm (trusted publishing); approve the staged version on npmjs.com with 2FA to publish it. No tag is needed.
