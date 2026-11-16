@@ -64,6 +64,11 @@ export interface EdgeCut {
   subtreeBytes: number;
   /** Other static import chains (not through this edge) that still reach the same module; up to 3. */
   alsoReachableVia?: string[][];
+  /**
+   * The cut is every edge from `importer` into the package (or file) of `imported`, not only this one:
+   * uniqueBytes needs all of the importer's imports of it gone.
+   */
+  grouped?: boolean;
   /** source location of the import statement in importer, if known */
   loc?: { line: number; column: number };
 }

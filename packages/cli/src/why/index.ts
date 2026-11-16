@@ -1,6 +1,6 @@
 import { packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
-import { buildRouteGraph, chainFrom, importGroupSkip, lostBytes, parentsWithout, reachableBytes, type RouteGraph } from "../wins/reach.js";
+import { buildRouteGraph, chainFrom, importGroupKey, importGroupSkip, lostBytes, parentsWithout, reachableBytes, type RouteGraph } from "../wins/reach.js";
 
 export interface WhyCut {
   importer: string;
@@ -128,14 +128,32 @@ function analyzeRoute(rg: RouteGraph, matchedKeys: Set<string>, maxChains: numbe
     for (let x = u || t; x > 0; x = par[x]) out.push(x);
     return out.reverse();
   };
-  const ranked = [...found.entries()].sort((a, b) => a[0] - b[0]).map(([, e]) => chainOf(e)).sort((a, b) => a.length - b.length).slice(0, maxChains);
+  // The cut an engineer can make: the last edge into the target on this chain (app-owned importer preferred).
+  const cutAt = (nodes: number[]): number => {
+    for (let i = nodes.length - 1; i > 0; i--) {
+      if (keyOf(rg.paths[nodes[i - 1]]) === rg.paths[nodes[i - 1]] && !targets.has(nodes[i - 1])) return i;
+    }
+    return nodes.length - 1;
+  };
+  // One import can be several graph edges, so chains that reach the same import through the same files say the
+  // same thing: keep the shortest of them.
+  const seen = new Set<string>();
+  const ranked = [...found.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, e]) => chainOf(e))
+    .sort((a, b) => a.length - b.length)
+    .filter((nodes) => {
+      const k = cutAt(nodes);
+      if (k === 0) return true;
+      const key = [...nodes.slice(0, k - 1).map((i) => rg.paths[i]), importGroupKey(rg, nodes[k - 1], nodes[k])].join("\0");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, maxChains);
 
   const chains: WhyChain[] = ranked.map((nodes) => {
-    // The cut an engineer can make: the last edge into the target on this chain (app-owned importer preferred).
-    let k = nodes.length - 1;
-    for (let i = nodes.length - 1; i > 0; i--) {
-      if (keyOf(rg.paths[nodes[i - 1]]) === rg.paths[nodes[i - 1]] && !targets.has(nodes[i - 1])) { k = i; break; }
-    }
+    const k = cutAt(nodes);
     const cut: WhyCut | null = k > 0 ? cutFor(rg, nodes[k - 1], nodes[k], targets) : null;
     return { chain: nodes.map((i) => rg.paths[i]), cut };
   });

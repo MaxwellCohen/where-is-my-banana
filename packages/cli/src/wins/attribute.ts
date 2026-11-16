@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isAppSourcePath, packageNameFromPath } from "@wimb/graph-v1";
 import type { ParsedGraph } from "@wimb/graph-v1";
 import type { EdgeCut, RouteAttribution } from "./types.js";
-import { buildRouteGraph, chainFrom, importGroupSkip, lostBytes, nodePackages, parentsWithout } from "./reach.js";
+import { buildRouteGraph, chainFrom, importGroupKey, importGroupSkip, lostBytes, nodePackages, parentsWithout } from "./reach.js";
 
 export interface AttributeOptions {
   /** Drop edges whose uniqueBytes is below this (default 2048). */
@@ -199,7 +199,7 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, pro
     if (parent[u] === -1 || !isAppSourcePath(paths[u])) continue;
     for (const v of succ[u]) {
       if (paths[v] === paths[u] || (pkgs[v] && FRAMEWORK_PKGS.has(pkgs[v]!))) continue;
-      const key = `${paths[u]}\0${pkgs[v] ?? paths[v]}`;
+      const key = importGroupKey(rg, u, v);
       let g = groups.get(key);
       if (!g) groups.set(key, (g = { from: [], to: [] }));
       if (!g.from.includes(u)) g.from.push(u);
@@ -252,6 +252,7 @@ function attributeRoute(graph: ParsedGraph, route: string, minBytes: number, pro
             chain: [...chainTo(u), paths[v]],
             uniqueBytes: exact,
             subtreeBytes: subtreeBytes(v),
+            grouped: true,
             ...(also.length ? { alsoReachableVia: also } : {}),
           },
         });

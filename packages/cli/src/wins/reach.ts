@@ -231,6 +231,13 @@ export function importGroupSkip(rg: RouteGraph, u: number, v: number): (a: numbe
   return pkg ? (a, b) => pkgs[b] === pkg && paths[a] === from : (a, b) => paths[b] === to && paths[a] === from;
 }
 
+/** Same for every edge importGroupSkip(rg, u, v) removes: u's file, then v's package (or v's file). */
+export function importGroupKey(rg: RouteGraph, u: number, v: number): string {
+  const pkgs = nodePackages(rg);
+  const pkg = pkgs[v] !== pkgs[u] ? pkgs[v] : null;
+  return `${rg.paths[u]}\0${pkg ?? rg.paths[v]}`;
+}
+
 /** BFS parents with some edges removed (-1 = unreachable without them). */
 export function parentsWithout(rg: RouteGraph, skip: (u: number, v: number) => boolean): number[] {
   return bfsParents(rg.succ, rg.idents.length, skip);

@@ -27,11 +27,14 @@ describe("import groups", () => {
     expect(edges).toHaveLength(1);
     expect(edges[0].edge).toEqual({ importer: "app/page.tsx", imported: "node_modules/yaml/index.js", packageName: "yaml" });
     expect(edges[0].uniqueBytes).toBe(4030);
+    expect(edges[0].grouped).toBe(true);
     expect(edges[0].alsoReachableVia).toBeUndefined();
 
-    const cut = whyReport(g, "yaml").routes[0].chains[0].cut!;
-    expect(cut.savedBytes).toBe(4030);
-    expect(cut.stillReachableVia).toBeNull();
+    // Both edges are the same import, so `why` shows one chain, not one per edge.
+    const { chains } = whyReport(g, "yaml").routes[0];
+    expect(chains.map((c) => c.chain)).toEqual([["app/page.tsx", "node_modules/yaml/index.js"]]);
+    expect(chains[0].cut!.savedBytes).toBe(4030);
+    expect(chains[0].cut!.stillReachableVia).toBeNull();
   });
 
   it("scores edges to several export parts of one module, on several layers, as one cut", () => {
@@ -88,9 +91,31 @@ describe("import groups", () => {
       },
       { "/": { seeds: ["page"], bytes: { "app/page.tsx": 100, "node_modules/p/a.js": 300, "node_modules/p/b.js": 500 } } },
     );
-    expect(edgesFrom(g, "app/page.tsx").map((e) => [e.edge.imported, e.uniqueBytes])).toEqual([
+    const edges = edgesFrom(g, "app/page.tsx");
+    expect(edges.map((e) => [e.edge.imported, e.uniqueBytes])).toEqual([
       ["node_modules/p/b.js", 500],
       ["node_modules/p/a.js", 300],
+    ]);
+    expect(edges.some((e) => e.grouped)).toBe(false);
+  });
+
+  it("keeps `why` chains that reach the same import through different files", () => {
+    const g = synGraph(
+      {
+        layout: { path: "app/layout.tsx", sync: ["nav", "page"] },
+        nav: { path: "components/Nav.tsx", sync: ["utilC"] },
+        page: { path: "app/page.tsx", sync: ["utilS"] },
+        // the same file on two bundler layers, each importing yaml
+        utilC: { path: "lib/util.ts", sync: ["entry", "api"] },
+        utilS: { path: "lib/util.ts", sync: ["entry", "api"] },
+        entry: { path: "node_modules/yaml/index.js" },
+        api: { path: "node_modules/yaml/dist/public-api.js" },
+      },
+      { "/": { seeds: ["layout"], bytes: { "app/layout.tsx": 1, "node_modules/yaml/index.js": 10, "node_modules/yaml/dist/public-api.js": 4000 } } },
+    );
+    expect(whyReport(g, "yaml").routes[0].chains.map((c) => c.chain.slice(0, -1))).toEqual([
+      ["app/layout.tsx", "components/Nav.tsx", "lib/util.ts"],
+      ["app/layout.tsx", "app/page.tsx", "lib/util.ts"],
     ]);
   });
 });

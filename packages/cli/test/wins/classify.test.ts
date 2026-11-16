@@ -92,6 +92,13 @@ export default function P() { return <main/>; }`,
 import Static from "../../components/Static";
 export default function C() { return <Static />; }`,
   );
+  write(
+    "components/Rx.tsx",
+    `"use client";
+import { of } from "rxjs";
+import { map } from "rxjs/operators";
+export default function Rx() { return <button onClick={() => of(1).pipe(map((x) => x + 1))}>rx</button>; }`,
+  );
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -118,6 +125,23 @@ describe("classifyWins", () => {
     const [w] = await run([attr("/h", "app/handler/page.tsx", "components/Chart.tsx", 20000)]);
     expect(w!.usage).toBe("event-handler-only");
     expect(w!.edit.replacementImport).toContain("await import('../../components/Chart')");
+  });
+
+  it("grouped cut -> the edit covers every import of the package in the file", async () => {
+    const of = "node_modules/rxjs/dist/esm5/internal/observable/of.js";
+    const grouped = attr("/rx", "components/Rx.tsx", of, 7000, "rxjs");
+    grouped.edges[0].grouped = true;
+    const [w] = await run([grouped]);
+    expect(w!.usage).toBe("event-handler-only");
+    expect(w!.edit.originalImport).toBe(`import { of } from "rxjs";\nimport { map } from "rxjs/operators";`);
+    expect(w!.edit.replacementImport).toBe(`const { of } = await import('rxjs');\nconst { map } = await import('rxjs/operators');`);
+    expect(w!.edit.steps[0]).toBe("components/Rx.tsx imports rxjs in 2 statements; the measured saving needs all of them changed, not only the first.");
+
+    // The same edge scored on its own names just the one statement.
+    const [single] = await run([attr("/rx", "components/Rx.tsx", of, 7000, "rxjs")]);
+    expect(single!.edit.originalImport).toBe(`import { of } from "rxjs";`);
+    expect(single!.edit.replacementImport).toBe(`const { of } = await import('rxjs');`);
+    expect(single!.edit.steps[0]).toBe("Remove the static import in components/Rx.tsx.");
   });
 
   it("always rendered in page -> above-the-fold needs-review", async () => {

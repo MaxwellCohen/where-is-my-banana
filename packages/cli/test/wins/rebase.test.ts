@@ -52,7 +52,26 @@ describe("rebaseGraph", () => {
       ["../../node_modules/zod/index.js", 3],
       ["[turbopack]/browser/runtime.ts", 4],
     ]);
-    expect(g.routes.get("/")!.entries![0].module_path).toBe("src/page.tsx");
+    const entry = g.routes.get("/")!.entries![0];
+    expect(entry.module_path).toBe("src/page.tsx");
+    expect(entry.client_references!.map((c) => c.module_path)).toEqual(["src/page.tsx"]);
+  });
+
+  it("is not misled by a sibling folder named like the project", () => {
+    // mono2/web is an old app next to mono2/packages/web; one of its files has a twin inside the project.
+    touch("mono2", "packages", "web", "src", "page.tsx");
+    touch("mono2", "packages", "web", "src", "util.ts");
+    touch("mono2", "web", "src", "util.ts");
+    const g = synGraph(
+      {
+        page: { path: "[project]/packages/web/src/page.tsx", sync: ["util", "old"] },
+        util: { path: "[project]/packages/web/src/util.ts" },
+        old: { path: "[project]/web/src/util.ts" },
+      },
+      { "/": { seeds: ["page"], bytes: { "packages/web/src/page.tsx": 1, "packages/web/src/util.ts": 2, "web/src/util.ts": 3 } } },
+    );
+    rebaseGraph(g, join(tmp, "mono2", "packages", "web"));
+    expect([...g.clientPartsByRoute.get("/")!.keys()]).toEqual(["src/page.tsx", "src/util.ts", "../../web/src/util.ts"]);
   });
 
   it("leaves a standalone project alone, even when a folder is named like the project", () => {

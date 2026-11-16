@@ -125,6 +125,41 @@ describe("analyzeImportUsage", () => {
   it("unparseable source falls back to empty", () => {
     expect(analyzeImportUsage("app/page.tsx", "import {{{", edge).found).toBe(false);
   });
+
+  describe("several import statements from one package", () => {
+    const rx = { importer: "components/Rx.tsx", imported: "node_modules/rxjs/dist/esm5/internal/observable/of.js", packageName: "rxjs" };
+    const src = `import type { Observable } from "rxjs";
+import { of } from "rxjs";
+import { map } from "rxjs/operators";
+export default function Rx(){ return <button onClick={() => of(1).pipe(map((x) => x + 1))}/> }`;
+
+    it("a single-edge cut reads the first value import, not an earlier type-only one", () => {
+      const u = analyzeImportUsage("components/Rx.tsx", src, rx);
+      expect(u.typeOnly).toBe(false);
+      expect(u.bindings).toEqual([{ local: "of", kind: "named", imported: "of" }]);
+      expect(u.originalImport).toBe(`import { of } from "rxjs";`);
+      expect(u.importCount).toBe(1);
+    });
+
+    it("a grouped cut covers every value import, each binding with its own specifier", () => {
+      const u = analyzeImportUsage("components/Rx.tsx", src, rx, { all: true });
+      expect(u.specifier).toBe("rxjs");
+      expect(u.bindings).toEqual([
+        { local: "of", kind: "named", imported: "of" },
+        { local: "map", kind: "named", imported: "map", specifier: "rxjs/operators" },
+      ]);
+      expect(u.originalImport).toBe(`import { of } from "rxjs";\nimport { map } from "rxjs/operators";`);
+      expect(u.importCount).toBe(2);
+      expect(u.importLoc).toEqual({ line: 2, column: 1 });
+      expect(u.usage).toBe("event-handler-only");
+    });
+
+    it("a grouped cut takes the least deferrable use across the statements", () => {
+      const rendered = src.replace("<button onClick={() => of(1).pipe(map((x) => x + 1))}/>", "<button onClick={() => of(1)}>{map.name}</button>");
+      expect(analyzeImportUsage("components/Rx.tsx", rendered, rx, { all: true }).usage).toBe("always-rendered");
+      expect(analyzeImportUsage("components/Rx.tsx", rendered, rx).usage).toBe("event-handler-only");
+    });
+  });
 });
 
 describe("moduleFacts", () => {

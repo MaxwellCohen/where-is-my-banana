@@ -12,14 +12,20 @@ export interface Binding {
   local: string;
   kind: "default" | "named" | "namespace";
   imported: string; // exported name ("default" for default)
+  /** module specifier, when it is not ImportUsage.specifier (the usage spans several import statements) */
+  specifier?: string;
 }
 
 export interface ImportUsage {
   usage: UsageKind;
   usageLoc?: { line: number; column: number };
   bindings: Binding[];
+  /** specifier of the (first) import statement */
   specifier: string;
+  /** source text of the import statement(s), one per line */
   originalImport: string;
+  /** import statements covered: 1, or more when `all` matched several */
+  importCount: number;
   typeOnly: boolean;
   isClient: boolean;
   inSuspense: boolean;
@@ -399,12 +405,17 @@ export function findGuardCandidate(importerPath: string, source: string, edge: E
   return first;
 }
 
-export function analyzeImportUsage(importerPath: string, source: string, edge: EdgeRef): ImportUsage {
+/**
+ * How the importer uses what it imports through `edge`. With `all`, every value import of the edge's package
+ * (or file) counts, not only the first: a grouped cut removes them all (see EdgeCut.grouped).
+ */
+export function analyzeImportUsage(importerPath: string, source: string, edge: EdgeRef, opts: { all?: boolean } = {}): ImportUsage {
   const empty: ImportUsage = {
     usage: "unknown",
     bindings: [],
     specifier: "",
     originalImport: "",
+    importCount: 0,
     typeOnly: false,
     isClient: false,
     inSuspense: false,
@@ -423,23 +434,27 @@ export function analyzeImportUsage(importerPath: string, source: string, edge: E
   const base = importerPath.split("/").pop()!.replace(/\.[^.]+$/, "");
   const isPageOrLayout = base === "page" || base === "layout";
 
-  let decl: AstNode | null = null;
+  const matching: AstNode[] = [];
   for (const s of program.body) {
     const n = toAst(s);
-    if (n.type === "ImportDeclaration" && matchesEdge(n.source?.value ?? "", importerPath, edge)) {
-      decl = n;
-      break;
-    }
+    if (n.type === "ImportDeclaration" && matchesEdge(n.source?.value ?? "", importerPath, edge)) matching.push(n);
   }
-  if (!decl) return { ...empty, isClient, isPageOrLayout };
+  if (matching.length === 0) return { ...empty, isClient, isPageOrLayout };
+  // `import type` leaves no edge in the bundle, so a value import is the one the edge stands for.
+  const value = matching.filter((d) => d.importKind !== "type");
+  const decls = value.length === 0 ? [matching[0]!] : opts.all ? value : [value[0]!];
+  const decl = decls[0]!;
 
   const bindings: Binding[] = [];
-  for (const sp of decl.specifiers ?? []) {
-    if (sp.importKind === "type") continue;
-    const local = sp.local?.name as string;
-    if (sp.type === "ImportDefaultSpecifier") bindings.push({ local, kind: "default", imported: "default" });
-    else if (sp.type === "ImportNamespaceSpecifier") bindings.push({ local, kind: "namespace", imported: "*" });
-    else bindings.push({ local, kind: "named", imported: sp.imported?.name ?? sp.imported?.value ?? local });
+  for (const d of decls) {
+    const from = d.source.value === decl.source.value ? {} : { specifier: d.source.value as string };
+    for (const sp of d.specifiers ?? []) {
+      if (sp.importKind === "type") continue;
+      const local = sp.local?.name as string;
+      if (sp.type === "ImportDefaultSpecifier") bindings.push({ local, kind: "default", imported: "default", ...from });
+      else if (sp.type === "ImportNamespaceSpecifier") bindings.push({ local, kind: "namespace", imported: "*", ...from });
+      else bindings.push({ local, kind: "named", imported: sp.imported?.name ?? sp.imported?.value ?? local, ...from });
+    }
   }
   const res: ImportUsage = {
     ...empty,
@@ -448,7 +463,8 @@ export function analyzeImportUsage(importerPath: string, source: string, edge: E
     isPageOrLayout,
     bindings,
     specifier: decl.source.value,
-    originalImport: source.slice(decl.start, decl.end),
+    originalImport: decls.map((d) => source.slice(d.start, d.end)).join("\n"),
+    importCount: decls.length,
     typeOnly: decl.importKind === "type",
     importLoc: locOf(decl.start ?? decl.span?.start ?? 0, lines),
   };

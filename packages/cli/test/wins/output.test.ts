@@ -65,4 +65,13 @@ describe("wins output", () => {
     expect(md).toContain("page.tsx -> a.tsx -> chart.tsx");
     expect(md).toContain("dynamic(() => import('./chart'))");
   });
+
+  it("marks every line of a multi-line import block in wins.md", () => {
+    const root = mkdtempSync(join(tmpdir(), "wimb-wins-"));
+    const win = { ...report.wins[0], edit: { ...report.wins[0].edit, originalImport: "import { a } from 'p/a'\nimport { b } from 'p/b'", replacementImport: "const { a } = await import('p/a');\nconst { b } = await import('p/b');" } };
+    writeWins(root, { ...report, wins: [win] });
+    expect(readFileSync(join(root, ".wimb/wins.md"), "utf-8")).toContain(
+      ["```ts", "- import { a } from 'p/a'", "- import { b } from 'p/b'", "+ const { a } = await import('p/a');", "+ const { b } = await import('p/b');", "```"].join("\n"),
+    );
+  });
 });
