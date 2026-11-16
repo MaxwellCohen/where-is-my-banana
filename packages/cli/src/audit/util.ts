@@ -122,10 +122,15 @@ export function* jsxTags(content: string, nameSource: string): Generator<JsxTag>
       if (quote) {
         if (ch === "\\" && depth > 0) i++; // JSX attribute strings have no escapes; JS strings in `{}` do
         else if (ch === quote) quote = "";
+        else if (ch === "\n" && depth > 0 && quote !== "`") quote = ""; // a JS string ends on its line: this was an apostrophe in text
       } else if (depth > 0 && ch === "/" && content[i + 1] === "*") {
         const close = content.indexOf("*/", i + 2); // `{/* don't */}`: a quote in a comment is not a string
         if (close < 0) break;
         i = close + 1;
+      } else if (depth > 0 && ch === "/" && content[i + 1] === "/" && /[\s{};,()]/.test(content[i - 1])) {
+        const nl = content.indexOf("\n", i + 2); // `// don't`: same for a line comment (not `http://` or a regex's `\/\/`)
+        if (nl < 0) break;
+        i = nl;
       } else if (ch === '"' || ch === "'" || ch === "`") quote = ch;
       else if (ch === "{") depth++;
       else if (ch === "}") depth = Math.max(0, depth - 1);

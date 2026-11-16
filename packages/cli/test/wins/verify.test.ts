@@ -96,8 +96,9 @@ describe("revert", () => {
   it("refuses --files paths dirty at baseline, reverts clean-at-baseline ones, and force overrides only the dirty rule", () => {
     git("checkout", "--", ".");
     writeFileSync(join(root, "app/b.tsx"), "local work\n");
+    writeFileSync(join(root, "..notes.txt"), "untracked; a name starting with two dots is still inside the project\n");
     snapshotFileState(root, rep({}, []));
-    expect(JSON.parse(readFileSync(join(root, ".wimb/verify-state.json"), "utf-8")).dirty).toContain("app/b.tsx");
+    expect(JSON.parse(readFileSync(join(root, ".wimb/verify-state.json"), "utf-8")).dirty).toEqual(expect.arrayContaining(["app/b.tsx", "..notes.txt"]));
     writeFileSync(join(root, "app/a.tsx"), "win edit\n");
     const plan = planRevert(root, ["app/a.tsx", "app/b.tsx"]);
     expect(plan.revert).toEqual(["app/a.tsx"]);

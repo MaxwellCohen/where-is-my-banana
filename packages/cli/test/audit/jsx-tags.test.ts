@@ -24,6 +24,18 @@ describe("jsxTags", () => {
   it("skips unterminated tags", () => {
     expect([...jsxTags(`<Image src="a" ${"x ".repeat(4000)}`, "Image")]).toEqual([]);
   });
+  it("an apostrophe in a comment inside an attribute does not run into the next tag", () => {
+    const src = `<Script\n  onLoad={() => {\n    // don't run twice\n    init(); /* it's fine */\n  }}\n  strategy="beforeInteractive"\n/>\n<p title='x'>after</p>\n<Script src="b.js" />`;
+    const tags = [...jsxTags(src, "Script")];
+    expect(tags).toHaveLength(2);
+    expect(tags[0].text).toBe(src.slice(0, src.indexOf("<p")).trimEnd());
+    expect(tags[1].text).toBe(`<Script src="b.js" />`);
+  });
+  it("does not read // inside a URL or a regex as a comment", () => {
+    const src = `<a\n  onClick={() => open(url.replace(/^http:\\/\\//, "https://"), x ? "//cdn" : y)}\n  href="//example.com/a"\n>`;
+    const [t] = [...jsxTags(src, "a")];
+    expect(t.text).toBe(src);
+  });
 });
 
 describe("arrow-function attributes before existing attributes", () => {
@@ -46,6 +58,14 @@ describe("arrow-function attributes before existing attributes", () => {
   it("<Script> multi-line onLoad with `a > b` and > in alt-like strings", () => {
     const c = scriptSrc(`<Script\n  onLoad={() => {\n    if (a > b) { init(); }\n  }}\n  data-x="a > b"\n  strategy="lazyOnload"\n  src="${gtag}"\n/>`);
     expect(run("third-party-script", { "app/a.tsx": c })).toEqual([]);
+  });
+  it("<Script> after one whose handler has an apostrophe in a comment is still reported and fixed on its own", () => {
+    const fb = "https://connect.facebook.net/en_US/fbevents.js";
+    const c = scriptSrc(`<Script\n  src="${gtag}"\n  onLoad={() => {\n    // don't run twice\n    init();\n  }}\n  strategy="lazyOnload"\n/>\n<p title='x'>after</p>\n<Script src="${fb}" strategy="beforeInteractive" />`);
+    const { findings, res } = fixOf("app/a.tsx", c, "third-party-script");
+    expect(findings.map((f) => f.line)).toEqual([11]);
+    expect(res.edits[0].after).toContain(`<Script src="${fb}" strategy="lazyOnload" />`);
+    expect(count(res.edits[0].after, /strategy="lazyOnload"/g)).toBe(2);
   });
   it("<Script> without strategy gets exactly one added", () => {
     const c = scriptSrc(`<Script onLoad={() => init()} src="${gtag}" data-x="a > b"/>`);

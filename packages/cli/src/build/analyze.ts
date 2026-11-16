@@ -10,6 +10,7 @@ import {
   type ModulesHeader,
 } from "./binary-format.js";
 import { createExportAccumulator, parseAnalyzeExportFile } from "./analyze-export.js";
+import { nextPackageDir } from "../wins/next-cli.js";
 import { normalizeModulePath, packageNameFromPath } from "@wimb/graph-v1";
 
 export { normalizeModulePath, packageNameFromPath };
@@ -59,7 +60,8 @@ export function hasAnalyzeArtifacts(distDir: string): boolean {
 }
 
 export function projectSupportsAnalyzeExport(projectRoot: string): boolean {
-  return existsSync(join(projectRoot, "node_modules", "next", "analyze", "graph-v1.schema.json"));
+  const next = nextPackageDir(projectRoot);
+  return !!next && existsSync(join(next, "analyze", "graph-v1.schema.json"));
 }
 
 export async function runBuildAnalysis(opts: BuildOptions): Promise<ByteAttribution | null> {

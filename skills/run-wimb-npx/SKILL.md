@@ -40,4 +40,4 @@ Read `.wimb/wins.json` in the **target project** (not in a temp npx cache). Foll
 
 ## Maintainer: release
 
-Bump the version in `packages/cli/package.json` and merge to `main`; that push starts the `release` workflow, which tests and publishes to npm. No tag is needed.
+Bump the version in `packages/cli/package.json` and merge to `main`; that push starts the `release` workflow, which tests and stages the version on npm. Approve the staged version on npmjs.com to publish it. No tag is needed.

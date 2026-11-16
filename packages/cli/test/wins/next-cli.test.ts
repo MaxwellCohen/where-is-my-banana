@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nextHasAnalyze, runNext } from "../../src/wins/next-cli.js";
+import { nextHasAnalyze, nextPackageDir, runNext } from "../../src/wins/next-cli.js";
+import { projectSupportsAnalyzeExport } from "../../src/build/analyze.js";
 
 function projectWithNext(version?: string): string {
   const dir = mkdtempSync(join(tmpdir(), "wins-next-"));
@@ -22,6 +23,39 @@ describe("nextHasAnalyze", () => {
   });
   it("assumes new when next is not installed", () => {
     expect(nextHasAnalyze(projectWithNext())).toBe(true);
+  });
+});
+
+describe("next hoisted to a workspace root", () => {
+  function workspace(version: string, withExport: boolean): { root: string; web: string } {
+    const root = projectWithNext(version);
+    if (withExport) {
+      mkdirSync(join(root, "node_modules", "next", "analyze"), { recursive: true });
+      writeFileSync(join(root, "node_modules", "next", "analyze", "graph-v1.schema.json"), "{}");
+    }
+    const web = join(root, "apps", "web");
+    mkdirSync(web, { recursive: true });
+    return { root, web };
+  }
+
+  it("reads the version and the export support from the parent node_modules", () => {
+    const { root, web } = workspace("16.4.3", true);
+    expect(nextPackageDir(web)).toBe(join(root, "node_modules", "next"));
+    expect(nextHasAnalyze(web)).toBe(true);
+    expect(projectSupportsAnalyzeExport(web)).toBe(true);
+  });
+  it("still sees an older hoisted Next as older", () => {
+    const { web } = workspace("16.3.8", false);
+    expect(nextHasAnalyze(web)).toBe(false);
+    expect(projectSupportsAnalyzeExport(web)).toBe(false);
+  });
+  it("prefers the project's own next over a hoisted one", () => {
+    const { web } = workspace("16.4.3", true);
+    mkdirSync(join(web, "node_modules", "next"), { recursive: true });
+    writeFileSync(join(web, "node_modules", "next", "package.json"), JSON.stringify({ version: "16.3.8" }));
+    expect(nextPackageDir(web)).toBe(join(web, "node_modules", "next"));
+    expect(nextHasAnalyze(web)).toBe(false);
+    expect(projectSupportsAnalyzeExport(web)).toBe(false);
   });
 });
 

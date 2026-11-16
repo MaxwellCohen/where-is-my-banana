@@ -121,7 +121,7 @@ function dirtyPaths(root: string): string[] | null {
     const out = new Set<string>();
     const add = (p: string) => {
       const rel = relative(realRoot, join(top, p));
-      if (rel && !rel.startsWith("..") && !isAbsolute(rel)) out.add(rel.split(sep).join("/"));
+      if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) out.add(rel.split(sep).join("/"));
     };
     for (let i = 0; i < parts.length; i++) {
       const e = parts[i];
