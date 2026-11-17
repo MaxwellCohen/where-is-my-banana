@@ -54,6 +54,8 @@ interface Group {
   routes: Record<string, number>;
   /** every route in the group already ships dynamic-import runtime */
   dynamicRuntime: boolean;
+  /** on some route the saving needs every import of the package (or file) in the importer gone (EdgeCut.grouped) */
+  grouped: boolean;
   alsoReachableVia?: string[][];
 }
 
@@ -72,13 +74,14 @@ function mergeEdges(attributions: RouteAttribution[]): Group[] {
       const key = `${cut.edge.importer}\0${cut.edge.imported}`;
       let g = groups.get(key);
       if (!g) {
-        g = { cut, routes: {}, dynamicRuntime: true };
+        g = { cut, routes: {}, dynamicRuntime: true, grouped: false };
         groups.set(key, g);
       } else if (cut.chain.length < g.cut.chain.length) {
         g.cut = { ...cut, loc: cut.loc ?? g.cut.loc };
       }
       g.routes[attr.route] = Math.max(g.routes[attr.route] ?? 0, cut.uniqueBytes);
       if (!attr.hasDynamicRuntime) g.dynamicRuntime = false;
+      if (cut.grouped) g.grouped = true;
       if (cut.alsoReachableVia && !g.alsoReachableVia) g.alsoReachableVia = cut.alsoReachableVia;
     }
   }
@@ -131,7 +134,7 @@ const LAZY_IMPORT: Partial<Record<Framework, string>> = {
 /** Lazy component declarations; non-Next frameworks expect a { default } module shape. */
 function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
   return u.bindings.map((b) => {
-    const spec = `'${u.specifier}'`;
+    const spec = `'${b.specifier ?? u.specifier}'`;
     if (b.kind === "namespace")
       return `const ${b.local} = await import(${spec}); // namespace import: use inside an async function/effect/handler, not as a component`;
     const named = b.kind === "named" ? (isIdent(b.imported) ? `m.${b.imported}` : `m["${b.imported}"]`) : null;
@@ -148,13 +151,14 @@ function lazyDecls(u: ImportUsage, opts: string, fw: Framework): string[] {
 
 function handlerImport(u: ImportUsage): string {
   return u.bindings
-    .map((b) =>
-      b.kind === "default"
-        ? `const { default: ${b.local} } = await import('${u.specifier}');`
+    .map((b) => {
+      const spec = `'${b.specifier ?? u.specifier}'`;
+      return b.kind === "default"
+        ? `const { default: ${b.local} } = await import(${spec});`
         : b.kind === "named"
-          ? `const { ${b.imported === b.local ? b.local : `${b.imported}: ${b.local}`} } = await import('${u.specifier}');`
-          : `const ${b.local} = await import('${u.specifier}');`,
-    )
+          ? `const { ${b.imported === b.local ? b.local : `${b.imported}: ${b.local}`} } = await import(${spec});`
+          : `const ${b.local} = await import(${spec});`;
+    })
     .join("\n");
 }
 
@@ -182,7 +186,7 @@ export async function classifyWins(
 
     const importerAbs = join(ctx.projectRoot, edge.importer);
     const importerSrc = edge.importer.startsWith("node_modules/") ? null : await readText(importerAbs);
-    const u: ImportUsage | null = importerSrc ? analyzeImportUsage(edge.importer, importerSrc, edge) : null;
+    const u: ImportUsage | null = importerSrc ? analyzeImportUsage(edge.importer, importerSrc, edge, { all: g.grouped }) : null;
 
     const usage: UsageKind = u?.found ? u.usage : "unknown";
     const reasons = new Set<SafetyReason>();
@@ -282,6 +286,9 @@ export async function classifyWins(
     }
 
     const edit = buildEdit(fixKind, usage, u, edge, ctx, routeNames, swapTarget?.replacement, guard, importerSrc, localPipe ? importedSrc : null);
+    if (u && u.importCount > 1) {
+      edit.steps.unshift(`${edge.importer} imports ${edge.packageName ?? edge.imported} in ${u.importCount} statements; the measured saving needs all of them changed, not only the first.`);
+    }
     if (movesToPreloaded) {
       edit.summary += ` (moves ${kb(total)} KB from first-load to preloaded; real saving only if the component is conditional)`;
       edit.steps.push("This only moves bytes from first-load to preloaded: the dynamic chunk is still preloaded on server render. Real transfer savings need the component to render conditionally (tab, modal, below-the-fold); otherwise the gain is parse/hydrate time.");

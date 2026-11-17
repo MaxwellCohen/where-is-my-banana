@@ -11,6 +11,7 @@ import {
   type ModulesHeader,
 } from "../build/binary-format.js";
 import { buildGraph, relPath } from "../graph/builder.js";
+import { rebaser, rootPrefix } from "./rebase.js";
 import { INJECTED_CLIENT_ENTRY_FILES } from "./reach.js";
 
 export interface BinaryGraphResult {
@@ -69,6 +70,11 @@ export async function buildGraphFromBinary(
   }
   if (perRoute.size === 0) return null;
 
+  // In a monorepo the artifacts are rooted at the workspace root; make paths relative to the project.
+  const prefix = rootPrefix([...perRoute.values()].flatMap((m) => [...m.keys()]), projectRoot);
+  const re = prefix ? rebaser(projectRoot, prefix) : (p: string) => p;
+  if (prefix) for (const [route, m] of perRoute) perRoute.set(route, new Map([...m].map(([k, v]) => [re(k), v])));
+
   const modules = new Map<string, GraphModule>();
   const byPath = new Map<string, string>(); // normalized path -> ident (first)
   let edgeSource: BinaryGraphResult["edgeSource"] = "source-graph";
@@ -82,7 +88,7 @@ export async function buildGraphFromBinary(
       if (hasEdges) edgeSource = "modules.data";
       const idents = list.map((m, i) => `${i}:${m.ident ?? m.path ?? ""}`);
       list.forEach((m, i) => {
-        const path = normalizeModulePath(m.path ?? m.ident ?? "");
+        const path = re(normalizeModulePath(m.path ?? m.ident ?? ""));
         if (!path) return;
         modules.set(idents[i], newModule(idents[i], path));
         if (!byPath.has(path)) byPath.set(path, idents[i]);

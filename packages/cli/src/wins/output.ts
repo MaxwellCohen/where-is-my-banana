@@ -106,6 +106,9 @@ export function formatWinsTerminal(report: WinsReport, opts: { top?: number; pac
   return lines.join("\n");
 }
 
+/** Each line of a (possibly multi-line) import block, marked like a diff. */
+const diffLines = (sign: "-" | "+", text?: string): string[] => (text ? text.split("\n").map((l) => `${sign} ${l}`) : []);
+
 export function formatWinsMarkdown(report: WinsReport): string {
   const out: string[] = [];
   out.push("# wimb wins", "");
@@ -161,7 +164,7 @@ export function formatWinsMarkdown(report: WinsReport): string {
     }
     if (w.stub) {
       // config shown above
-    } else if (w.edit.originalImport) out.push("```ts", `- ${w.edit.originalImport}`, ...(w.edit.replacementImport ? [`+ ${w.edit.replacementImport}`] : []), "```", "");
+    } else if (w.edit.originalImport) out.push("```ts", ...diffLines("-", w.edit.originalImport), ...diffLines("+", w.edit.replacementImport), "```", "");
     else if (w.edit.replacementImport) out.push("```ts", w.edit.replacementImport, "```", "");
     if (w.edit.steps.length) out.push(...w.edit.steps.map((s, n) => `${n + 1}. ${s}`), "");
     out.push(...formatTestImpactMarkdown(w));
