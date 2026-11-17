@@ -17,6 +17,7 @@ function project(files: Record<string, string>) {
 /** Fix once, then verify a second run changes nothing. */
 function fix(files: Record<string, string>, opts: { force?: boolean } = {}) {
   const root = project(files);
+  opts = { force: true, ...opts };
   const first = applyFixes(root, collectFindings({ projectRoot: root }).findings, opts);
   const snapshot = Object.fromEntries(Object.keys(files).map((p) => [p, readFileSync(join(root, p), "utf-8")]));
   const second = applyFixes(root, collectFindings({ projectRoot: root }).findings, opts);
@@ -146,6 +147,28 @@ describe("fix: safety", () => {
     const forced = applyFixes(root, collectFindings({ projectRoot: root }).findings, { force: true });
     expect(forced.changes).toHaveLength(1);
     expect(readFileSync(join(root, "components/G.tsx"), "utf-8")).toContain('loading="lazy"');
+  });
+  it("fails closed outside a git repo unless forced", () => {
+    const rel = "components/G.tsx";
+    const orig = `export const G = () => <img src="a" />;\n`;
+    const root = project({ [rel]: orig });
+    const r = applyFixes(root, collectFindings({ projectRoot: root }).findings);
+    expect(r.changes).toEqual([]);
+    expect(r.edits).toEqual([]);
+    expect(r.skipped.some((s) => s.file === rel && /cannot check for unstaged/.test(s.reason))).toBe(true);
+    expect(readFileSync(join(root, rel), "utf-8")).toBe(orig);
+    const forced = applyFixes(root, collectFindings({ projectRoot: root }).findings, { force: true });
+    expect(forced.changes).toHaveLength(1);
+    expect(readFileSync(join(root, rel), "utf-8")).toContain('loading="lazy"');
+  });
+  it("dry run in a non-git dir returns the diff and writes nothing", () => {
+    const rel = "components/G.tsx";
+    const orig = `export const G = () => <img src="a" />;\n`;
+    const root = project({ [rel]: orig });
+    const r = applyFixes(root, collectFindings({ projectRoot: root }).findings, { dryRun: true });
+    expect(r.diff).toContain(`--- a/${rel}`);
+    expect(r.skipped).toEqual([]);
+    expect(readFileSync(join(root, rel), "utf-8")).toBe(orig);
   });
   it("dry run writes nothing and returns a unified diff", () => {
     const root = project({ "components/G.tsx": `export const G = () => <img src="a" />;\n` });

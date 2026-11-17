@@ -7,7 +7,8 @@ export interface LaunchPayload {
   wins?: WinsReport;
 }
 
-const MAX_PAYLOAD_BYTES = 200 * 1024 * 1024;
+const MAX_SRC_PAYLOAD_BYTES = 200 * 1024 * 1024;
+const MAX_INLINE_PAYLOAD_BYTES = 32 * 1024 * 1024;
 
 function fromBase64Url(s: string): Uint8Array {
   const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
@@ -16,23 +17,24 @@ function fromBase64Url(s: string): Uint8Array {
   return out;
 }
 
-async function gunzipText(bytes: Uint8Array): Promise<string> {
+async function gunzipText(bytes: Uint8Array, maxBytes: number): Promise<string> {
   const stream = new Response(bytes as BufferSource).body!.pipeThrough(new DecompressionStream("gzip"));
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let total = 0;
-  let text = "";
+  const chunks: string[] = [];
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_PAYLOAD_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel().catch(() => undefined);
       throw new Error("Launch payload is too large after decompression");
     }
-    text += decoder.decode(value, { stream: true });
+    chunks.push(decoder.decode(value, { stream: true }));
   }
-  return text + decoder.decode();
+  chunks.push(decoder.decode());
+  return chunks.join("");
 }
 
 export function parseLaunchPayload(parsed: unknown): LaunchPayload {
@@ -48,26 +50,36 @@ export function parseLaunchPayload(parsed: unknown): LaunchPayload {
 /**
  * Read data embedded in the URL fragment.
  * `#d=<base64url(gzip(JSON {graph,wins}))>` carries the data inline (fragments never reach a server);
- * `#src=<http(s) URL>` fetches a JSON (or .gz) payload, e.g. from `wimb open`'s localhost server.
+ * `#src=<URL>` fetches a gzip JSON payload, but only from `http:` on loopback (`wimb open`'s localhost server).
+ * `#d=` is capped at a smaller decompressed size than loopback `#src=`.
  * Returns null when the fragment has neither key.
  */
-export async function loadLaunchPayloadFromHash(hash: string): Promise<LaunchPayload | null> {
+export async function loadLaunchPayloadFromHash(
+  hash: string,
+  inlineMaxBytes: number = MAX_INLINE_PAYLOAD_BYTES,
+): Promise<LaunchPayload | null> {
   const params = new URLSearchParams(hash.replace(/^#/, ""));
   const d = params.get("d");
   const src = params.get("src");
   try {
     if (d) {
-      return parseLaunchPayload(JSON.parse(await gunzipText(fromBase64Url(d))));
+      return parseLaunchPayload(JSON.parse(await gunzipText(fromBase64Url(d), inlineMaxBytes)));
     }
     if (src) {
       const url = new URL(src);
-      const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-      if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {
-        throw new Error("src must be https, or http on localhost");
+      if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+        throw new Error("src must be http on localhost, 127.0.0.1 or [::1]");
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { redirect: "error" });
       if (!res.ok) throw new Error(`Could not fetch ${src} (${res.status})`);
-      return parseLaunchPayload(JSON.parse(await gunzipText(new Uint8Array(await res.arrayBuffer()))));
+      const len = Number(res.headers.get("content-length"));
+      if (len > MAX_SRC_PAYLOAD_BYTES) {
+        await res.body?.cancel().catch(() => undefined);
+        throw new Error("Launch payload is too large");
+      }
+      return parseLaunchPayload(
+        JSON.parse(await gunzipText(new Uint8Array(await res.arrayBuffer()), MAX_SRC_PAYLOAD_BYTES)),
+      );
     }
   } catch (err) {
     throw new Error(`Could not load data from the URL: ${err instanceof Error ? err.message : String(err)}`);

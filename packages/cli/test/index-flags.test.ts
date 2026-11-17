@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FlagError,
+  collectFlag,
   parseExitThreshold,
   parseFormats,
   parseNumberFlag,
@@ -39,5 +40,15 @@ describe("validateWinsReport", () => {
     expect(validateWinsReport({ routes: [], wins: [] }, "x").wins).toEqual([]);
     expect(() => validateWinsReport({}, "x")).toThrow(FlagError);
     expect(() => validateWinsReport(null, "x")).toThrow(FlagError);
+  });
+});
+
+describe("collectFlag", () => {
+  it("collects every occurrence in both forms", () => {
+    expect(collectFlag(["--url", "a", "--cwd", "x", "--url=b,c", "--url", "d"], "url")).toEqual(["a", "b,c", "d"]);
+  });
+  it("ignores other flags, missing values and everything after --", () => {
+    expect(collectFlag(["--urls-file", "f", "--url", "--json", "--", "--url", "z"], "url")).toEqual([]);
+    expect(collectFlag([], "url")).toEqual([]);
   });
 });

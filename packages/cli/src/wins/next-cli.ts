@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export const NEXT_TIMEOUT_MS = 600_000;
 
@@ -34,14 +34,14 @@ function hookCleanup(): void {
   }
 }
 
-/** Run the project's `next` via `npm exec --no-install` (never downloads). Resolves with stdout when `capture` is set. */
+/** Run the project's `next` via `npm exec --no` (never downloads). Resolves with stdout when `capture` is set. */
 export function runNext(projectRoot: string, args: string[], opts: RunNextOptions = {}): Promise<string> {
   hookCleanup();
   const label = `next ${args.slice(0, 2).join(" ")}`;
   const timeoutMs = opts.timeoutMs ?? NEXT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const localNext = join(projectRoot, "node_modules", ".bin", process.platform === "win32" ? "next.cmd" : "next");
-    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npm", ["exec", "--no-install", "--", "next", ...args]];
+    const [cmd, cmdArgs] = existsSync(localNext) ? [localNext, args] : ["npm", ["exec", "--no", "--", "next", ...args]];
     const child = spawn(cmd as string, cmdArgs as string[], {
       shell: process.platform === "win32",
       cwd: projectRoot,
@@ -75,11 +75,22 @@ export function runNext(projectRoot: string, args: string[], opts: RunNextOption
   });
 }
 
+/** The `next` package the project resolves: its own node_modules, or a parent's when a workspace hoists it. */
+export function nextPackageDir(projectRoot: string): string | null {
+  for (let dir = resolve(projectRoot); ; dir = dirname(dir)) {
+    const pkg = join(dir, "node_modules", "next");
+    if (existsSync(join(pkg, "package.json"))) return pkg;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
 /** `next analyze` / `analyze export` need Next 16.4+; older 16.x only has `experimental-analyze`. Unknown version => assume new. */
 export function nextHasAnalyze(projectRoot: string): boolean {
+  const next = nextPackageDir(projectRoot);
+  if (!next) return true;
   let version: string;
   try {
-    version = JSON.parse(readFileSync(join(projectRoot, "node_modules", "next", "package.json"), "utf-8")).version;
+    version = JSON.parse(readFileSync(join(next, "package.json"), "utf-8")).version;
   } catch {
     return true;
   }

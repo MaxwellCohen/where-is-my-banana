@@ -1,5 +1,5 @@
 import type { AuditContext, Finding } from "./types.js";
-import { find, importsOf, isCode, isLayoutLike, isTestFile, JSX_RE, lineAt, matches } from "./util.js";
+import { find, importsOf, isCode, isLayoutLike, isTestFile, JSX_RE, jsxTags, lineAt, matches } from "./util.js";
 
 const THIRD_PARTY =
   /googletagmanager|google-analytics|gtag|analytics\.js|segment\.(?:com|io)|cdn\.segment|hotjar|fullstory|optimizely|onetrust|cookiebot|cookielaw|intercom|drift\.com|driftt|livechat|calendly|connect\.facebook|facebook\.net|fbevents|tiktok|clarity\.ms|dataLayer/i;
@@ -20,7 +20,7 @@ export function thirdPartyScript(ctx: AuditContext): Finding[] {
     const c = f.content;
     const usesNextScript = importsOf(c).some((i) => i.spec === "next/script");
     if (usesNextScript) {
-      for (const { m, line } of matches(c, /<Script\b((?:[^>]|=>)*)>/)) {
+      for (const { m, line } of jsxTags(c, "Script")) {
         const tail = c.slice(m.index, m.index + m[0].length + 600);
         if (!THIRD_PARTY.test(tail)) continue;
         const strat = m[1].match(/strategy\s*=\s*\{?\s*["'](\w+)["']/)?.[1];
@@ -51,7 +51,7 @@ export function thirdPartyScript(ctx: AuditContext): Finding[] {
       }
     }
     if (isLayoutLike(f.path)) {
-      for (const { m, line } of matches(c, /<script\b((?:[^>]|=>)*)>/)) {
+      for (const { m, line } of jsxTags(c, "script")) {
         const attrs = m[1];
         const tail = c.slice(m.index, m.index + m[0].length + 600);
         if (/\bsrc\s*=/.test(attrs) || THIRD_PARTY.test(tail)) {
@@ -139,7 +139,7 @@ export function mapsWidgets(ctx: AuditContext): Finding[] {
       }
     }
     if (/\.[jt]sx$/.test(f.path)) {
-      for (const { m, line } of matches(f.content, /<iframe\b((?:[^>]|=>)*)>/)) {
+      for (const { m, line } of jsxTags(f.content, "iframe")) {
         if (/youtube\.com|youtube-nocookie|vimeo\.com|google\.com\/maps|calendly\.com/.test(m[1]) && !/loading\s*=\s*["']lazy/.test(m[1])) {
           out.push(
             find("maps-widgets", {

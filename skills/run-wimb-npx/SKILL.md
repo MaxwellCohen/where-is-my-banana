@@ -12,7 +12,7 @@ Use this when the agent or user does **not** have the WIMB monorepo cloned; the 
 
 ## Prerequisites
 
-- Node.js **≥ 20**
+- Node.js **20.19+ or 22.12+**
 - A Next.js App Router project path (`--cwd`)
 
 ## Command
@@ -40,4 +40,4 @@ Read `.wimb/wins.json` in the **target project** (not in a temp npx cache). Foll
 
 ## Maintainer: release
 
-Push a `vX.Y.Z` tag matching `packages/cli/package.json` (on `main`); the `release` workflow tests and publishes to npm.
+Bump the version in `packages/cli/package.json` and merge to `main`; that push starts the `release` workflow, which tests and stages the version on npm. Approve the staged version on npmjs.com to publish it. No tag is needed.

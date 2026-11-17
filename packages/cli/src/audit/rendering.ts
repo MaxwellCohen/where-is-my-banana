@@ -1,5 +1,5 @@
 import type { AuditContext, Finding, SourceFile } from "./types.js";
-import { find, importsOf, isAppFile, isClient, isCode, isTestFile, lineAt, matches, resolveImport } from "./util.js";
+import { find, importsOf, isAppFile, isClient, isCode, isTestFile, jsxTags, lineAt, matches, resolveImport } from "./util.js";
 
 const isRouteHandler = (p: string) => /(?:^|\/)route\.[cm]?[jt]s$/.test(p) || /(?:^|\/)api\//.test(p);
 const isLayout = (p: string) => isAppFile(p, "layout") || isAppFile(p, "template");
@@ -206,19 +206,19 @@ export function fullCmsPayloadToClient(ctx: AuditContext): Finding[] {
       if (m[1]) payload.add(m[1]);
     }
     if (payload.size === 0) continue;
-    for (const { m, line } of matches(f.content, /<([A-Z][\w]*)\b((?:[^>]|=>)*)>/)) {
-      const target = clientComps.get(m[1]);
+    for (const { name, attrs, line } of jsxTags(f.content, "[A-Z][\\w]*")) {
+      const target = clientComps.get(name);
       if (!target) continue;
       for (const v of payload) {
         const re = new RegExp(`\\{\\s*\\.\\.\\.${v}\\s*\\}|\\b(?:data|page|content|entry|fields|item|items|response|res|payload|cms\\w*|props)\\s*=\\s*\\{\\s*${v}\\s*\\}`);
-        if (!re.test(m[2])) continue;
+        if (!re.test(attrs)) continue;
         out.push(
           find("full-cms-payload-to-client", {
             severity: "medium",
             file: f.path,
             line,
-            message: `Whole CMS response \`${v}\` is passed to client component <${m[1]}> (${target.path}); it is serialized into the HTML/RSC payload (__next_f).`,
-            fix: `Pick only the fields <${m[1]}> renders (e.g. title, href, image{url,alt}) and pass those as props, or keep the data fetch in a server component and pass server-rendered children.`,
+            message: `Whole CMS response \`${v}\` is passed to client component <${name}> (${target.path}); it is serialized into the HTML/RSC payload (__next_f).`,
+            fix: `Pick only the fields <${name}> renders (e.g. title, href, image{url,alt}) and pass those as props, or keep the data fetch in a server component and pass server-rendered children.`,
           }),
         );
         break;

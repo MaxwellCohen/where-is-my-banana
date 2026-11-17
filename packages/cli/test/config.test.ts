@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { DEFAULT_CONFIG, mergeConfig, parseNextConfig, parseNextConfigFromSource } from "../src/config.js";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DEFAULT_CONFIG, loadConfig, mergeConfig, parseNextConfig, parseNextConfigFromSource } from "../src/config.js";
 import { fixturePath } from "./helpers.js";
 
 describe("mergeConfig", () => {
@@ -38,5 +41,32 @@ describe("parseNextConfigFromSource", () => {
   it("extracts distDir from source text", () => {
     const config = parseNextConfigFromSource("export default { distDir: 'out' }");
     expect(config.distDir).toBe("out");
+  });
+});
+
+describe("loadConfig", () => {
+  it("loads a TypeScript wimb.config.ts and merges it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wimb-cfg-"));
+    try {
+      writeFileSync(join(dir, "wimb.config.ts"), 'const c: { ignores: { rules: string[] } } = { ignores: { rules: ["unused-dependency"] } };\nexport default c;\n');
+      const cfg = await loadConfig(dir);
+      expect(cfg.ignores.rules).toEqual(["unused-dependency"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns on stderr and uses defaults when the config is broken", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wimb-cfg-"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      writeFileSync(join(dir, "wimb.config.ts"), 'throw new Error("boom");\n');
+      const cfg = await loadConfig(dir);
+      expect(cfg).toEqual(DEFAULT_CONFIG);
+      expect(spy.mock.calls[0][0]).toMatch(/^wimb: could not load wimb\.config\.ts: .*boom.*; using defaults$/);
+    } finally {
+      spy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -68,3 +68,21 @@ export function parseTop(value: string | undefined, fallback: number): number {
   if (!Number.isInteger(n) || n < 1) throw new FlagError(`--top must be a positive integer, got '${value}'`);
   return n;
 }
+
+/** Every value of a repeatable string flag from raw argv (`--f v` and `--f=v`); citty keeps only the last. */
+export function collectFlag(rawArgs: readonly string[], name: string): string[] {
+  const out: string[] = [];
+  const long = `--${name}`;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const a = rawArgs[i];
+    if (a === "--") break;
+    if (a === long) {
+      const next = rawArgs[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        out.push(next);
+        i++;
+      }
+    } else if (a.startsWith(`${long}=`)) out.push(a.slice(long.length + 1));
+  }
+  return out;
+}
