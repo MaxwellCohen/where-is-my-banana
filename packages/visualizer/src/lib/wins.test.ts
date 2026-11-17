@@ -46,6 +46,12 @@ describe("parseWinsReport", () => {
     expect(r.wins[0]).toMatchObject({ safety: "needs-review", usage: "unknown", edit: { verify: "" } });
     expect(r.wins[1].routes).toEqual({ "/": 1 });
   });
+  it("keeps every fix kind the CLI emits", () => {
+    const kinds = ["lazy", "move-to-server", "swap-package", "deep-import", "remove", "stub-alias", "guard-heavy"];
+    const r = parseWinsReport(report(kinds.map((fixKind) => win({ id: fixKind, fixKind }))));
+    expect(r.wins.map((w) => w.fixKind)).toEqual(kinds);
+    expect(r.droppedWins).toBe(0);
+  });
   it("rejects wrong envelope", () => {
     expect(() => parseWinsReport({ wins: [] })).toThrow(/WinsReport/);
     expect(() => parseWinsReport(null)).toThrow(/WinsReport/);

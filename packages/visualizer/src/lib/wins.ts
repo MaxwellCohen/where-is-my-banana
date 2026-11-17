@@ -1,4 +1,4 @@
-export type FixKind = "lazy" | "move-to-server" | "swap-package" | "deep-import" | "remove";
+export type FixKind = "lazy" | "move-to-server" | "swap-package" | "deep-import" | "remove" | "stub-alias" | "guard-heavy";
 export type Safety = "safe" | "needs-review";
 
 export interface WinEdit {
@@ -36,7 +36,7 @@ export interface WinsReport {
   wins: Win[];
 }
 
-const FIX_KINDS: FixKind[] = ["lazy", "move-to-server", "swap-package", "deep-import", "remove"];
+const FIX_KINDS: FixKind[] = ["lazy", "move-to-server", "swap-package", "deep-import", "remove", "stub-alias", "guard-heavy"];
 const isObj = (v: unknown): v is Record<string, unknown> =>
   Boolean(v) && typeof v === "object" && !Array.isArray(v);
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
